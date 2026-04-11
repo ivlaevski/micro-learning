@@ -1,0 +1,30 @@
+{
+  "package_id": "com.vlaevski.microlearning",
+  "edition": "202601",
+  "name": "micro-learning",
+  "version": "1.0.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.7",
+  "tagline": "Micro learning on G2 — topics and scores",
+  "description": "Micro Learning helps you capture topics for research, review your list on the glasses, and track a learning score. Configure OpenAI and ElevenLabs on the phone.",
+  "author": "Ivan Vlaevski",
+  "entrypoint": "index.html",
+  "supported_languages": ["en"],
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "OpenAI and ElevenLabs APIs (see whitelist).",
+      "whitelist": [
+        "https://api.elevenlabs.io",
+        "https://api.openai.com",
+        "https://elevenlabs.com",
+        "https://platform.openai.com",
+        "*"
+      ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Reserved for recording new topics via glasses microphone (future)."
+    }
+  ]
+}

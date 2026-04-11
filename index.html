@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Micro Learning – G2</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        max-width: 640px;
+        margin: 2rem auto;
+        padding: 0 1rem 3rem;
+        background: #050509;
+        color: #f5f5f5;
+      }
+
+      h1 {
+        margin-bottom: 0.25rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.35rem 0.6rem;
+      }
+
+      .app-version {
+        font-size: 0.55em;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        color: #6b7280;
+      }
+
+      .muted {
+        color: #9ca3af;
+        font-size: 0.9rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+        margin-top: 1.25rem;
+      }
+
+      .card {
+        background: radial-gradient(circle at top left, #111827, #020617);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        border: 1px solid #111827;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.9);
+      }
+
+      .card h2 {
+        font-size: 1rem;
+        margin: 0 0 0.5rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.8rem;
+        margin-top: 0.75rem;
+        margin-bottom: 0.25rem;
+        color: #9ca3af;
+      }
+
+      input {
+        width: 100%;
+        padding: 0.45rem 0.55rem;
+        border-radius: 0.45rem;
+        border: 1px solid #1f2937;
+        background: #020617;
+        color: #f9fafb;
+        font-family: inherit;
+        font-size: 0.85rem;
+        box-sizing: border-box;
+      }
+
+      input:focus {
+        outline: 2px solid #4f46e5;
+        outline-offset: 1px;
+        border-color: transparent;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0.5rem 0.9rem;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        font-family: inherit;
+        transition: background 120ms ease, transform 60ms ease, box-shadow 120ms ease;
+      }
+
+      .btn-primary {
+        background: linear-gradient(to right, #6366f1, #4f46e5);
+        color: white;
+        box-shadow: 0 12px 25px rgba(79, 70, 229, 0.6);
+      }
+
+      .btn-primary:hover {
+        background: linear-gradient(to right, #818cf8, #6366f1);
+        transform: translateY(-1px);
+        box-shadow: 0 18px 38px rgba(79, 70, 229, 0.75);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: #e5e7eb;
+        border: 1px solid #1f2937;
+      }
+
+      .btn-ghost:hover {
+        background: rgba(31, 41, 55, 0.8);
+      }
+
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+
+      .topic-list {
+        list-style: none;
+        padding: 0;
+        margin: 0.35rem 0 0.25rem;
+        max-height: 160px;
+        overflow-y: auto;
+        border-radius: 0.5rem;
+        border: 1px solid #1f2937;
+        background: #020617;
+      }
+
+      .topic-list li {
+        padding: 0.35rem 0.55rem;
+        font-size: 0.8rem;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.8);
+        cursor: pointer;
+      }
+
+      .topic-list li:last-child {
+        border-bottom: none;
+      }
+
+      .topic-list li.selected {
+        background: rgba(79, 70, 229, 0.35);
+      }
+
+      #status {
+        margin: 0;
+        padding: 0.75rem 0.9rem;
+        background: #020617;
+        border-radius: 0.75rem;
+        border: 1px solid #111827;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        min-height: 2.4rem;
+      }
+
+      #phone-audio-start-banner {
+        margin-top: 1.25rem;
+      }
+
+      #phone-audio-start-banner[hidden] {
+        display: none !important;
+      }
+
+      .ai-settings-header-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.35rem 0.75rem;
+        margin-bottom: 0.25rem;
+      }
+
+      .ai-settings-header-row h2 {
+        margin: 0;
+      }
+
+      #event-log {
+        margin-top: 1rem;
+        padding: 0.6rem 0.8rem;
+        background: #020617;
+        border-radius: 0.75rem;
+        border: 1px solid #111827;
+        font-size: 0.75rem;
+        max-height: 200px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Micro Learning <span class="app-version">%BUILD_VERSION%</span></h1>
+        <p class="muted">Short learning sessions on G2. Manage topics and API keys on the phone.</p>
+      </header>
+
+      <section class="card" id="phone-audio-start-banner">
+        <h2>Phone audio</h2>
+        <p class="muted" style="margin: 0 0 0.75rem">
+          Future playback from the glasses may use this device. On iPhone and many Android WebViews, unlock audio with a
+          tap here once after load.
+        </p>
+        <div class="btn-row">
+          <button type="button" id="audio-unlock-test-start" class="btn btn-primary">
+            Unlock &amp; test phone speaker
+          </button>
+          <button type="button" id="phone-audio-start-banner-dismiss" class="btn btn-ghost">
+            I won&apos;t use phone audio
+          </button>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="card" id="status-card">
+          <h2>Status</h2>
+          <pre id="status">Booting…</pre>
+        </section>
+
+        <section class="card" id="prompt-topics">
+          <h2>Topics</h2>
+          <p class="muted">Topics sync to the glasses list (and future flows). Select a row to delete it.</p>
+
+          <label for="new-topic">Add topic</label>
+          <input id="new-topic" type="text" placeholder="e.g. Spaced repetition, Kotlin coroutines…" />
+
+          <ul id="topics-list" class="topic-list"></ul>
+
+          <div class="btn-row">
+            <button id="topics-add" class="btn btn-primary" type="button">Add topic</button>
+            <button id="topics-delete" class="btn btn-ghost" type="button">Delete selected</button>
+            <button id="topics-save" class="btn btn-ghost" type="button">Save list</button>
+          </div>
+        </section>
+
+        <section class="card" id="ai-settings">
+          <div class="ai-settings-header-row">
+            <h2>AI settings</h2>
+          </div>
+          <p class="muted">Stored only on this phone. Used for upcoming OpenAI / ElevenLabs features.</p>
+
+          <label for="openai-key">OpenAI API key</label>
+          <input id="openai-key" type="password" autocomplete="off" placeholder="sk-…" />
+
+          <label for="elevenlabs-key">ElevenLabs API key</label>
+          <input id="elevenlabs-key" type="password" autocomplete="off" />
+
+          <div class="btn-row">
+            <button id="save-settings" class="btn btn-primary" type="button">Save settings</button>
+          </div>
+        </section>
+      </div>
+
+      <pre id="event-log"></pre>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
