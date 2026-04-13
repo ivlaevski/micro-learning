@@ -1,7 +1,30 @@
-import type { MicroLearningConfig } from './types';
+import type { EvenAppBridge } from '@evenrealities/even_hub_sdk';
+
+import type { LearningCard, MicroLearningConfig } from './types';
 
 const STATUS_ID = 'status';
 const LOG_ID = 'event-log';
+
+async function getStorageValue(bridge: EvenAppBridge | null, key: string): Promise<string> {
+  if (bridge) return (await bridge.getLocalStorage(key)) ?? '';
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+async function setStorageValue(bridge: EvenAppBridge | null, key: string, value: string): Promise<void> {
+  if (bridge) {
+    await bridge.setLocalStorage(key, value);
+    return;
+  }
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore storage errors */
+  }
+}
 
 export function setStatus(message: string): void {
   // eslint-disable-next-line no-console
@@ -70,47 +93,267 @@ export function installGlobalErrorLogging(): void {
   };
 }
 
-export function loadConfigFromLocalStorage(): MicroLearningConfig {
+export async function loadConfigFromLocalStorage(bridge: EvenAppBridge | null): Promise<MicroLearningConfig> {
+  const [openAiApiKey, elevenLabsApiKey] = await Promise.all([
+    getStorageValue(bridge, 'micro-learning:openai-key'),
+    getStorageValue(bridge, 'micro-learning:elevenlabs-key'),
+  ]);
   return {
-    openAiApiKey: localStorage.getItem('micro-learning:openai-key') ?? '',
-    elevenLabsApiKey: localStorage.getItem('micro-learning:elevenlabs-key') ?? '',
+    openAiApiKey,
+    elevenLabsApiKey,
   };
 }
 
-export function saveConfigToLocalStorage(config: MicroLearningConfig): void {
-  localStorage.setItem('micro-learning:openai-key', config.openAiApiKey.trim());
-  localStorage.setItem('micro-learning:elevenlabs-key', config.elevenLabsApiKey.trim());
+export async function saveConfigToLocalStorage(
+  bridge: EvenAppBridge | null,
+  config: MicroLearningConfig,
+): Promise<void> {
+  await Promise.all([
+    setStorageValue(bridge, 'micro-learning:openai-key', config.openAiApiKey.trim()),
+    setStorageValue(bridge, 'micro-learning:elevenlabs-key', config.elevenLabsApiKey.trim()),
+  ]);
 }
 
-export function loadTopicsFromLocalStorage(): string[] {
-  const raw = localStorage.getItem('micro-learning:topics') ?? '';
+export async function loadTopicsFromLocalStorage(bridge: EvenAppBridge | null): Promise<string[]> {
+  const raw = await getStorageValue(bridge, 'micro-learning:topics');
   return raw
     .split('\n')
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
 }
 
-export function saveTopicsToLocalStorage(topics: string[]): void {
+export async function saveTopicsToLocalStorage(
+  bridge: EvenAppBridge | null,
+  topics: string[],
+): Promise<void> {
   const normalized = topics.map((value) => value.trim()).filter((value) => value.length > 0);
-  localStorage.setItem('micro-learning:topics', normalized.join('\n'));
+  await setStorageValue(bridge, 'micro-learning:topics', normalized.join('\n'));
 }
 
-const LEARNING_SCORE_KEY = 'micro-learning:learning-score';
+const LEARNING_PROGRESS_DAILY_KEY = 'micro-learning:learning-progress-daily';
+const LEGACY_LEARNING_PROGRESS_KEY = 'micro-learning:learning-progress';
+const LEGACY_LEARNING_SCORE_KEY = 'micro-learning:learning-score';
 
-export function loadLearningScore(): number {
+export type LearningProgress = {
+  cardsShown: number;
+  cardsLearned: number;
+};
+
+export type DailyProgressEntry = { s: number; l: number };
+
+export type DailyProgressMap = Record<string, DailyProgressEntry>;
+
+function localYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseYmdLocal(ymd: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/** Monday 00:00 local of the ISO week containing `d`. */
+function startOfIsoWeekMonday(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setHours(0, 0, 0, 0);
+  const day = x.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  x.setDate(x.getDate() + offset);
+  return x;
+}
+
+/** ISO week number (1–53) for the week containing this local calendar day. */
+function isoWeekNumberLocal(dayInWeek: Date): number {
+  const d = new Date(dayInWeek.getFullYear(), dayInWeek.getMonth(), dayInWeek.getDate());
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
+    )
+  );
+}
+
+function pruneDailyProgressOlderThan365Days(map: DailyProgressMap): DailyProgressMap {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - 365);
+  const out: DailyProgressMap = {};
+  for (const [k, v] of Object.entries(map)) {
+    const d = parseYmdLocal(k);
+    if (!d || d < cutoff) continue;
+    out[k] = { s: Math.max(0, Math.floor(v.s)), l: Math.max(0, Math.floor(v.l)) };
+  }
+  return out;
+}
+
+async function loadDailyProgressMap(bridge: EvenAppBridge | null): Promise<DailyProgressMap> {
+  const raw = await getStorageValue(bridge, LEARNING_PROGRESS_DAILY_KEY);
+  if (!raw) return {};
   try {
-    const raw = localStorage.getItem(LEARNING_SCORE_KEY);
-    if (!raw) return 0;
-    const n = Number(raw);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const map: DailyProgressMap = {};
+    for (const [k, v] of Object.entries(o)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) continue;
+      if (v == null || typeof v !== 'object') continue;
+      const row = v as Record<string, unknown>;
+      const s = Math.max(0, Math.floor(Number(row.s ?? row.shown) || 0));
+      const l = Math.max(0, Math.floor(Number(row.l ?? row.learned) || 0));
+      map[k] = { s, l };
+    }
+    return pruneDailyProgressOlderThan365Days(map);
   } catch {
-    return 0;
+    return {};
   }
 }
 
-export function saveLearningScore(score: number): void {
-  const n = Math.max(0, Math.floor(score));
-  localStorage.setItem(LEARNING_SCORE_KEY, String(n));
+async function saveDailyProgressMap(bridge: EvenAppBridge | null, map: DailyProgressMap): Promise<void> {
+  const pruned = pruneDailyProgressOlderThan365Days(map);
+  await setStorageValue(bridge, LEARNING_PROGRESS_DAILY_KEY, JSON.stringify(pruned));
+}
+
+export async function loadLearningProgress(bridge: EvenAppBridge | null): Promise<LearningProgress> {
+  const map = await loadDailyProgressMap(bridge);
+  if (Object.keys(map).length > 0) {
+    let cardsShown = 0;
+    let cardsLearned = 0;
+    for (const { s, l } of Object.values(map)) {
+      cardsShown += s;
+      cardsLearned += l;
+    }
+    return { cardsShown, cardsLearned };
+  }
+  try {
+    const raw = await getStorageValue(bridge, LEGACY_LEARNING_PROGRESS_KEY);
+    if (raw) {
+      const o = JSON.parse(raw) as { cardsShown?: unknown; cardsLearned?: unknown };
+      return {
+        cardsShown: Math.max(0, Math.floor(Number(o.cardsShown) || 0)),
+        cardsLearned: Math.max(0, Math.floor(Number(o.cardsLearned) || 0)),
+      };
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const legacy = await getStorageValue(bridge, LEGACY_LEARNING_SCORE_KEY);
+    const n = legacy ? Math.max(0, Math.floor(Number(legacy) || 0)) : 0;
+    return { cardsShown: 0, cardsLearned: n };
+  } catch {
+    return { cardsShown: 0, cardsLearned: 0 };
+  }
+}
+
+export async function incrementLearningCardsShown(bridge: EvenAppBridge | null): Promise<void> {
+  const map = await loadDailyProgressMap(bridge);
+  const k = localYmd(new Date());
+  const e = map[k] ?? { s: 0, l: 0 };
+  e.s += 1;
+  map[k] = e;
+  await saveDailyProgressMap(bridge, map);
+}
+
+export async function incrementLearningCardsLearned(bridge: EvenAppBridge | null): Promise<void> {
+  const map = await loadDailyProgressMap(bridge);
+  const k = localYmd(new Date());
+  const e = map[k] ?? { s: 0, l: 0 };
+  e.l += 1;
+  map[k] = e;
+  await saveDailyProgressMap(bridge, map);
+}
+
+/** 7 rows (Mon–Sun) × 10 weeks; each cell 3 chars: ` - `, ` + `, or ` x `. */
+export function formatLearningProgressGridDisplay(map: DailyProgressMap): string {
+  const LABEL_W = 3;
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  const cellStr = (shown: number, learned: number): string => {
+    if (shown <= 0) return ' - ';
+    const ratio = learned / shown;
+    return ratio >= 0.25 ? ' x ' : ' + ';
+  };
+
+  const today = new Date();
+  const newestMon = startOfIsoWeekMonday(today);
+
+  let header = ''.padStart(LABEL_W);
+  for (let c = 0; c < 10; c++) {
+    const mon = new Date(newestMon);
+    mon.setDate(mon.getDate() - (9 - c) * 7);
+    const wk = isoWeekNumberLocal(mon);
+    header += `${String(wk).padStart(2, ' ')} `;
+  }
+
+  const lines: string[] = [header];
+
+  for (let r = 0; r < 7; r++) {
+    let row = `${dayLabels[r]}  `.slice(0, LABEL_W);
+    for (let c = 0; c < 10; c++) {
+      const mon = new Date(newestMon);
+      mon.setDate(mon.getDate() - (9 - c) * 7 + r);
+      const key = localYmd(mon);
+      const e = map[key] ?? { s: 0, l: 0 };
+      row += cellStr(e.s, e.l);
+    }
+    lines.push(row);
+  }
+
+  lines.push('');
+  lines.push('- none  + shown, <25% learned  x 25%+ learned');
+  return lines.join('\n');
+}
+
+export async function loadLearningProgressGridText(bridge: EvenAppBridge | null): Promise<string> {
+  const map = await loadDailyProgressMap(bridge);
+  return formatLearningProgressGridDisplay(map);
+}
+
+/** @deprecated Use loadLearningProgress; kept for one-off migrations. */
+export async function loadLearningScore(bridge: EvenAppBridge | null): Promise<number> {
+  const p = await loadLearningProgress(bridge);
+  return p.cardsLearned;
+}
+
+function base64UrlEncodeUtf8(str: string): string {
+  const bytes = new TextEncoder().encode(str.trim());
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Stable storage key for JSON card arrays keyed by topic title. */
+export function topicCardsStorageKey(topic: string): string {
+  return `micro-learning:topic-cards:${base64UrlEncodeUtf8(topic)}`;
+}
+
+export async function saveLearningCardsForTopic(
+  bridge: EvenAppBridge | null,
+  topic: string,
+  cards: LearningCard[],
+): Promise<void> {
+  await setStorageValue(bridge, topicCardsStorageKey(topic), JSON.stringify(cards));
+}
+
+export async function loadLearningCardsForTopic(
+  bridge: EvenAppBridge | null,
+  topic: string,
+): Promise<LearningCard[]> {
+  try {
+    const raw = await getStorageValue(bridge, topicCardsStorageKey(topic));
+    if (!raw) return [];
+    const value = JSON.parse(raw) as unknown;
+    return Array.isArray(value) ? (value as LearningCard[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function clamp(value: number, min: number, max: number): number {

@@ -24,7 +24,7 @@
     },
     {
       "name": "g2-microphone",
-      "desc": "Reserved for recording new topics via glasses microphone (future)."
+      "desc": "Capture audio on glasses for “Record new topic” (PCM to ElevenLabs STT)."
     }
   ]
 }

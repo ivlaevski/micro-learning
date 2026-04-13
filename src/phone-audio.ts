@@ -1,3 +1,5 @@
+import type { EvenAppBridge } from '@evenrealities/even_hub_sdk';
+
 /** Playback sink for `HTMLAudioElement`. Empty = OS default. */
 export const PHONE_AUDIO_OUTPUT_KEY = 'micro-learning:phone-audio-output-id';
 
@@ -6,11 +8,25 @@ export const PHONE_AUDIO_INPUT_KEY = 'micro-learning:phone-audio-input-id';
 
 let sharedPlaybackAudio: HTMLAudioElement | null = null;
 let sharedPlaybackBlobUrl: string | null = null;
+let phoneAudioStorageBridge: EvenAppBridge | null = null;
+
+async function getStorageValue(key: string): Promise<string> {
+  if (phoneAudioStorageBridge) return (await phoneAudioStorageBridge.getLocalStorage(key)) ?? '';
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 let phonePlaybackPrimedThisSession = false;
 
 export function hasPhonePlaybackPrimedThisSession(): boolean {
   return phonePlaybackPrimedThisSession;
+}
+
+export function setPhoneAudioStorageBridge(bridge: EvenAppBridge | null): void {
+  phoneAudioStorageBridge = bridge;
 }
 
 function silentWavDataUri(): string {
@@ -73,12 +89,12 @@ export function phoneAudioOutputSupportsSink(): boolean {
   );
 }
 
-export function applyPhoneAudioOutput(audio: HTMLAudioElement): void {
-  const id = localStorage.getItem(PHONE_AUDIO_OUTPUT_KEY)?.trim();
+export async function applyPhoneAudioOutput(audio: HTMLAudioElement): Promise<void> {
+  const id = (await getStorageValue(PHONE_AUDIO_OUTPUT_KEY)).trim();
   if (!id) return;
   const el = audio as HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> };
   if (typeof el.setSinkId !== 'function') return;
-  void el.setSinkId(id).catch(() => {});
+  await el.setSinkId(id).catch(() => {});
 }
 
 export function getSharedPlaybackAudio(): HTMLAudioElement {
@@ -87,7 +103,7 @@ export function getSharedPlaybackAudio(): HTMLAudioElement {
     sharedPlaybackAudio.preload = 'auto';
     sharedPlaybackAudio.setAttribute('playsinline', 'true');
     sharedPlaybackAudio.setAttribute('webkit-playsinline', 'true');
-    applyPhoneAudioOutput(sharedPlaybackAudio);
+    void applyPhoneAudioOutput(sharedPlaybackAudio);
   }
   return sharedPlaybackAudio;
 }
@@ -101,7 +117,7 @@ export function revokeSharedPlaybackBlobUrl(): void {
 
 export async function primeSharedPlaybackAudioFromUserGesture(): Promise<boolean> {
   const a = getSharedPlaybackAudio();
-  applyPhoneAudioOutput(a);
+  await applyPhoneAudioOutput(a);
   try {
     revokeSharedPlaybackBlobUrl();
     a.pause();

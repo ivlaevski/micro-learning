@@ -1,4 +1,21 @@
-export type ViewName = 'main-menu' | 'glasses-topic-list' | 'app-message';
+export type ViewName =
+  | 'main-menu'
+  | 'glasses-topic-list'
+  | 'topic-card-study'
+  | 'app-message'
+  | 'topic-recording'
+  | 'topic-generating-cards';
+
+/** `done` = finished study flow (hidden from study like `hidden`). */
+export type LearningCardStatus = 'new-card' | 'read' | 'learned' | 'hidden' | 'done';
+
+export interface LearningCard {
+  cardId: string;
+  cardTitle: string;
+  text: string;
+  additionalResearchNeeded: boolean;
+  status: LearningCardStatus;
+}
 
 export interface MicroLearningConfig {
   openAiApiKey: string;
