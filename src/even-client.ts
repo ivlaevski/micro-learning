@@ -101,6 +101,9 @@ export class MicroLearningClient {
   private cardStudyMenuActions: CardStudyMenuAction[] = [];
   private readAloudAborted = false;
   private appMessageAfterDismiss: 'main-menu' | 'topic-card-study' = 'main-menu';
+  /** Ignores duplicate hub gestures shortly after a handled tap/scroll (cross-screen echo). */
+  private hubGestureCooldownUntilMs = 0;
+  private static readonly HUB_GESTURE_COOLDOWN_MS = 900;
   private isTopicVoiceRecording = false;
   private fullScreenTimerInterval: ReturnType<typeof setInterval> | null = null;
   private fullScreenTimerStartedAtMs: number | null = null;
@@ -629,8 +632,7 @@ export class MicroLearningClient {
     }
   }
 
-  private async renderGlassesTopicList(): Promise<void> {
-    this.ui.view = 'glasses-topic-list';
+  private async renderGlassesTopicList(): Promise<void> {    
     this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
 
     if (!this.ui.topics.length) {
@@ -666,13 +668,18 @@ export class MicroLearningClient {
       }),
     });
 
-    await this.applyRebuildPageContainer(
+    const ok = await this.applyRebuildPageContainer(
       new RebuildPageContainer({
         containerTotalNum: 1,
         listObject: [list],
       }),
     );
-    setStatus('Topics on glasses: tap one or Back.');
+    if (ok) {
+      setStatus('Topics on glasses: tap one or Back.');
+      this.ui.view = 'glasses-topic-list';
+    } else {
+      appendEventLog('Failed to render glasses topic list');
+    }
   }
 
   private recomputeVisibleCardIndices(session: CardStudySession): void {
@@ -988,7 +995,7 @@ export class MicroLearningClient {
 
     const speakText = this.sanitizeForDisplay(
       `${(card.cardTitle || 'Card').trim()}.\n\n${(card.text || '').trim()}`.trim(),
-      8000,
+      1000,
     );
     const titleDisplay = this.sanitizeForDisplay(card.cardTitle || 'Card', 220);
     const bodyDisplay = this.sanitizeForDisplay(
@@ -1038,7 +1045,7 @@ export class MicroLearningClient {
             borderColor: 5,
             paddingLength: 0,
             content: bodyDisplay,
-            isEventCapture: 0,
+            isEventCapture: 1,
           }),
         ],
       }),
@@ -1166,6 +1173,41 @@ export class MicroLearningClient {
     };
   }
 
+  private isDoubleClickHubGesture(event: EvenHubEvent, eventType: unknown): boolean {
+    const textG = gestureFromTextEvent(event.textEvent);
+    const listG = gestureFromListEvent(event.listEvent);
+    const merged = OsEventTypeList.fromJson(eventType) ?? eventType;
+    return (
+      textG === OsEventTypeList.DOUBLE_CLICK_EVENT ||
+      listG === OsEventTypeList.DOUBLE_CLICK_EVENT ||
+      merged === OsEventTypeList.DOUBLE_CLICK_EVENT
+    );
+  }
+
+  /** Clicks/scrolls suppressed during cooldown; double-clicks are not (so DTap still works after a tap). */
+  private eventLooksLikeCooldownBlockableGesture(event: EvenHubEvent, eventType: unknown): boolean {
+    if (this.isDoubleClickHubGesture(event, eventType)) return false;
+    const textG = gestureFromTextEvent(event.textEvent);
+    const listG = gestureFromListEvent(event.listEvent);
+    const merged = OsEventTypeList.fromJson(eventType) ?? eventType;
+    const blockClickOrScroll = (g: unknown): boolean =>
+      g === OsEventTypeList.CLICK_EVENT ||
+      g === OsEventTypeList.SCROLL_TOP_EVENT ||
+      g === OsEventTypeList.SCROLL_BOTTOM_EVENT;
+    if (blockClickOrScroll(textG) || blockClickOrScroll(listG) || blockClickOrScroll(merged)) return true;
+    if ((event.textEvent || event.listEvent) && merged === undefined) return true;
+    return false;
+  }
+
+  private shouldIgnoreDueToHubGestureCooldown(event: EvenHubEvent, eventType: unknown): boolean {
+    if (performance.now() >= this.hubGestureCooldownUntilMs) return false;
+    return this.eventLooksLikeCooldownBlockableGesture(event, eventType);
+  }
+
+  private markHubGestureCooldown(): void {
+    this.hubGestureCooldownUntilMs = performance.now() + MicroLearningClient.HUB_GESTURE_COOLDOWN_MS;
+  }
+
   private async onEvenHubEvent(event: EvenHubEvent): Promise<void> {
     const hubPcm = event.audioEvent?.audioPcm as Uint8Array | number[] | string | undefined;
     if (hubPcm != null && hubPcm !== '') {
@@ -1181,6 +1223,10 @@ export class MicroLearningClient {
       event.sysEvent?.eventType ??
       event.listEvent?.eventType ??
       undefined;
+
+    if (this.shouldIgnoreDueToHubGestureCooldown(event, eventType)) {
+      return;
+    }
 
     if (this.ui.view === 'topic-recording') {
       if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
@@ -1203,6 +1249,7 @@ export class MicroLearningClient {
         if (this.isTopicVoiceRecording) {
           await this.toggleTopicVoiceRecording();
         }
+        this.markHubGestureCooldown();
         return;
       }
 
@@ -1211,6 +1258,7 @@ export class MicroLearningClient {
         this.isTopicVoiceRecording = false;
         this.clearTopicRecordingUi();
         await this.renderMainMenu();
+        this.markHubGestureCooldown();
         return;
       }
     }
@@ -1231,7 +1279,8 @@ export class MicroLearningClient {
         return;
       }
       const idx = event.listEvent.currentSelectItemIndex ?? 0;
-      await this.handleMainMenuSelect(idx);
+      this.markHubGestureCooldown();
+      await this.handleMainMenuSelect(idx);      
       return;
     }
 
@@ -1247,11 +1296,13 @@ export class MicroLearningClient {
         const topics = this.ui.topics;
         const idx = event.listEvent.currentSelectItemIndex ?? 0;
         if (idx >= topics.length) {
+          this.markHubGestureCooldown();
           await this.renderMainMenu();
         } else {
           const topic = topics[idx];
+          this.markHubGestureCooldown();
           await this.openTopicCardStudy(topic);
-        }
+        }        
         return;
       }
     }
@@ -1268,6 +1319,7 @@ export class MicroLearningClient {
       if (textG === OsEventTypeList.SCROLL_TOP_EVENT || mergedGesture === OsEventTypeList.SCROLL_TOP_EVENT) {
         this.cardStudy = null;
         await this.renderGlassesTopicList();
+        this.markHubGestureCooldown();
         return;
       }
 
@@ -1276,6 +1328,7 @@ export class MicroLearningClient {
       const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
       if (doubleFromChannels || doubleFromMerged) {
         await this.openTopicCardStudyMenu();
+        this.markHubGestureCooldown();
         return;
       }
 
@@ -1285,6 +1338,7 @@ export class MicroLearningClient {
         mergedGesture === OsEventTypeList.CLICK_EVENT || mergedGesture === undefined;
       if (clickFromChannels || clickFromMerged) {
         await this.handleTopicCardStudyTapAdvance();
+        this.markHubGestureCooldown();
         return;
       }
     }
@@ -1300,6 +1354,7 @@ export class MicroLearningClient {
       if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
         const idx = event.listEvent.currentSelectItemIndex ?? 0;
         await this.handleTopicCardStudyMenuSelect(idx);
+        this.markHubGestureCooldown();
         return;
       }
     }
@@ -1316,6 +1371,7 @@ export class MicroLearningClient {
       const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
       if (doubleFromChannels || doubleFromMerged) {
         await this.cancelCardReadAloudAndReturn();
+        this.markHubGestureCooldown();
       }
       return;
     }
@@ -1330,6 +1386,7 @@ export class MicroLearningClient {
         } else {
           await this.renderMainMenu();
         }
+        this.markHubGestureCooldown();
       }
       return;
     }
