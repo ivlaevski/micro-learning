@@ -2,6 +2,8 @@ export type ViewName =
   | 'main-menu'
   | 'glasses-topic-list'
   | 'topic-card-study'
+  | 'topic-card-study-menu'
+  | 'topic-card-read-aloud'
   | 'app-message'
   | 'topic-recording'
   | 'topic-generating-cards';

@@ -132,3 +132,37 @@ export async function generateLearningCardsFromTopic(apiKey: string, topic: stri
   const base = parseCardsFromModelText(outputText);
   return base.map((c) => ({ ...c, status: 'new-card' as const }));
 }
+
+const ELEVENLABS_DEFAULT_VOICE_ID = 'rWArYo7a2NWuBYf5BE4V';
+
+export async function synthesizeSpeech(elevenLabsApiKey: string, text: string): Promise<ArrayBuffer> {
+  if (!elevenLabsApiKey.trim()) {
+    throw new Error('ElevenLabs API key not configured');
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error('Text to speak is empty');
+  }
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_DEFAULT_VOICE_ID}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'xi-api-key': elevenLabsApiKey.trim(),
+      Accept: 'audio/mpeg',
+    },
+    body: JSON.stringify({
+      text: trimmed.slice(0, 8000),
+      model_id: 'eleven_multilingual_v2',
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    appendEventLog(`ElevenLabs TTS error ${res.status}: ${errText.slice(0, 400)}`);
+    throw new Error(`ElevenLabs TTS error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  return res.arrayBuffer();
+}

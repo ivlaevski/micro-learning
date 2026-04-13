@@ -271,41 +271,44 @@ export async function incrementLearningCardsLearned(bridge: EvenAppBridge | null
 /** 7 rows (Mon–Sun) × 10 weeks; each cell 3 chars: ` - `, ` + `, or ` x `. */
 export function formatLearningProgressGridDisplay(map: DailyProgressMap): string {
   const LABEL_W = 3;
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const cellStr = (shown: number, learned: number): string => {
-    if (shown <= 0) return ' - ';
+    if (shown <= 0) return '___';
     const ratio = learned / shown;
-    return ratio >= 0.25 ? ' x ' : ' + ';
+    return ratio >= 0.25 ? '_#_' : 
+                           '_=_';
   };
 
   const today = new Date();
   const newestMon = startOfIsoWeekMonday(today);
 
-  let header = ''.padStart(LABEL_W);
-  for (let c = 0; c < 10; c++) {
+  let header =''; //'Week_'.padStart(5, '_');
+  for (let c = 0; c < 15; c++) {
     const mon = new Date(newestMon);
-    mon.setDate(mon.getDate() - (9 - c) * 7);
+    mon.setDate(mon.getDate() - (14 - c) * 7);
     const wk = isoWeekNumberLocal(mon);
-    header += `${String(wk).padStart(2, ' ')} `;
+    header += `${String(wk).padStart(2, '_')}_`;
   }
+  header += ' - Week#';
 
   const lines: string[] = [header];
 
   for (let r = 0; r < 7; r++) {
-    let row = `${dayLabels[r]}  `.slice(0, LABEL_W);
-    for (let c = 0; c < 10; c++) {
+    let row = ''; //`${dayLabels[r]}_____`.slice(0, 5);
+    for (let c = 0; c < 15; c++) {
       const mon = new Date(newestMon);
-      mon.setDate(mon.getDate() - (9 - c) * 7 + r);
+      mon.setDate(mon.getDate() - (14 - c) * 7 + r);
       const key = localYmd(mon);
       const e = map[key] ?? { s: 0, l: 0 };
       row += cellStr(e.s, e.l);
     }
+    row += ` ${dayLabels[r]}`;
     lines.push(row);
   }
 
-  lines.push('');
-  lines.push('- none  + shown, <25% learned  x 25%+ learned');
+  //lines.push('');
+  //lines.push(' (=) shown or <25% learned;  (#) 25%+ learned');
   return lines.join('\n');
 }
 

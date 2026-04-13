@@ -115,6 +115,18 @@ export function revokeSharedPlaybackBlobUrl(): void {
   }
 }
 
+export function prepareSharedPlaybackFromMp3(arrayBuffer: ArrayBuffer): HTMLAudioElement {
+  revokeSharedPlaybackBlobUrl();
+  const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+  const url = URL.createObjectURL(blob);
+  sharedPlaybackBlobUrl = url;
+  const a = getSharedPlaybackAudio();
+  a.volume = 1;
+  a.src = url;
+  void applyPhoneAudioOutput(a);
+  return a;
+}
+
 export async function primeSharedPlaybackAudioFromUserGesture(): Promise<boolean> {
   const a = getSharedPlaybackAudio();
   await applyPhoneAudioOutput(a);

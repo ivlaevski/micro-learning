@@ -16,6 +16,7 @@ import {
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk';
 
+import { synthesizeSpeech } from './api';
 import type { LearningCard, LearningCardStatus, ViewName } from './types';
 import { introduceTopicWithCards } from './topic-pipeline';
 import {
@@ -37,6 +38,11 @@ import {
   incrementLearningCardsLearned,
   incrementLearningCardsShown,
 } from './utils';
+import {
+  getSharedPlaybackAudio,
+  prepareSharedPlaybackFromMp3,
+  revokeSharedPlaybackBlobUrl,
+} from './phone-audio';
 
 const MAX_CONTENT_LENGTH = 900;
 const FULL_SCREEN_TIMER_CONTAINER_ID = 11;
@@ -52,19 +58,6 @@ function normalizeLearningCardStatus(raw: unknown): LearningCardStatus {
     return raw;
   }
   return 'new-card';
-}
-
-function nextMarkVerbForStatus(status: LearningCardStatus): string {
-  switch (status) {
-    case 'new-card':
-      return 'read';
-    case 'read':
-      return 'learned';
-    case 'learned':
-      return 'done';
-    default:
-      return 'done';
-  }
 }
 
 function formatElapsedMmSs(totalSeconds: number): string {
@@ -95,6 +88,8 @@ type CardStudySession = {
   cursor: number;
 };
 
+type CardStudyMenuAction = 'read-aloud' | 'mark-read' | 'mark-learned' | 'mark-done' | 'back';
+
 export class MicroLearningClient {
   private readonly bridge: EvenAppBridge;
   private isStartupCreated = false;
@@ -103,6 +98,9 @@ export class MicroLearningClient {
     topics: [],
   };
   private cardStudy: CardStudySession | null = null;
+  private cardStudyMenuActions: CardStudyMenuAction[] = [];
+  private readAloudAborted = false;
+  private appMessageAfterDismiss: 'main-menu' | 'topic-card-study' = 'main-menu';
   private isTopicVoiceRecording = false;
   private fullScreenTimerInterval: ReturnType<typeof setInterval> | null = null;
   private fullScreenTimerStartedAtMs: number | null = null;
@@ -505,7 +503,12 @@ export class MicroLearningClient {
     }
   }
 
-  private async showAppMessage(body: string, info = '[Tab=back]'): Promise<void> {
+  private async showAppMessage(
+    body: string,
+    info = '[Tab=back]',
+    afterDismiss: 'main-menu' | 'topic-card-study' = 'main-menu',
+  ): Promise<void> {
+    this.appMessageAfterDismiss = afterDismiss;
     this.ui.view = 'app-message';
     const contentText = this.sanitizeForDisplay(body.slice(0, MAX_CONTENT_LENGTH));
     const bodyEl = new TextContainerProperty({
@@ -528,7 +531,7 @@ export class MicroLearningClient {
       xPosition: 8,
       yPosition: 0,
       width: 556,
-      height: 30,
+      height: 32,
       borderWidth: 1,
       borderColor: 5,
       borderRadius: 2,
@@ -547,6 +550,7 @@ export class MicroLearningClient {
 
   private async renderMainMenu(): Promise<void> {
     this.cardStudy = null;
+    this.cardStudyMenuActions = [];
     this.ui.view = 'main-menu';
     this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
 
@@ -726,14 +730,12 @@ export class MicroLearningClient {
     if (storageIdx === undefined) return;
 
     const card = session.allCards[storageIdx];
-    const status = normalizeLearningCardStatus(card.status);
-    const markVerb = nextMarkVerbForStatus(status);
     const idLabel =
       card.cardId && card.cardId.length > 0 && card.cardId.length <= 18
         ? card.cardId
         : String(pos + 1);
     const topLine = this.sanitizeForDisplay(
-      `[${idLabel}/${total}] [Tap=next][DTap= mark as ${markVerb}] [Scr↑ = topics]`,
+      `[${idLabel}/${total}] [Tap=next][DTap=menu] [Scr↑ = topics]`,
       260,
     );
     const titleLine = this.sanitizeForDisplay(card.cardTitle || '(No title)', 220);
@@ -812,50 +814,258 @@ export class MicroLearningClient {
     await this.renderTopicCardStudyView();
   }
 
-  private async handleTopicCardStudyDoubleTap(): Promise<void> {
+  private async openTopicCardStudyMenu(): Promise<void> {
     const session = this.cardStudy;
-    if (!session || session.visibleStorageIndices.length === 0) return;
-
-    const oldVisible = [...session.visibleStorageIndices];
-    const oldCursor = session.cursor;
-    const storageIdx = oldVisible[oldCursor];
+    if (!session?.visibleStorageIndices.length) return;
+    const storageIdx = session.visibleStorageIndices[session.cursor];
     if (storageIdx === undefined) return;
+    const st = normalizeLearningCardStatus(session.allCards[storageIdx].status);
 
-    const card = session.allCards[storageIdx];
-    const st = normalizeLearningCardStatus(card.status);
+    const labels: string[] = [];
+    const actions: CardStudyMenuAction[] = [];
 
+    labels.push('Read aloud (Unlock & test phone speaker first)');
+    actions.push('read-aloud');
     if (st === 'new-card') {
-      card.status = 'read';
-    } else if (st === 'read') {
-      card.status = 'learned';
-    } else if (st === 'learned') {
-      card.status = 'done';
-      await incrementLearningCardsLearned(this.bridge);
-    } else {
+      labels.push('Mark as Read');
+      actions.push('mark-read');
+    }
+    if (st === 'new-card' || st === 'read') {
+      labels.push('Mark as Learned');
+      actions.push('mark-learned');
+    }
+    labels.push('Mark as Done');
+    actions.push('mark-done');
+    labels.push('<- Back to learning topics');
+    actions.push('back');
+
+    this.cardStudyMenuActions = actions;
+
+    const list = new ListContainerProperty({
+      containerID: 8,
+      containerName: 'ml-study-menu',
+      xPosition: 0,
+      yPosition: 0,
+      width: 576,
+      height: 288,
+      borderWidth: 1,
+      borderColor: 5,
+      borderRadius: 6,
+      paddingLength: 4,
+      isEventCapture: 1,
+      itemContainer: new ListItemContainerProperty({
+        itemCount: labels.length,
+        itemWidth: 560,
+        isItemSelectBorderEn: 1,
+        itemName: labels.map((t) => this.sanitizeForDisplay(t, 60)),
+      }),
+    });
+
+    const ok = await this.applyRebuildPageContainer(
+      new RebuildPageContainer({ containerTotalNum: 1, listObject: [list] }),
+    );
+    if (ok) {
+      this.ui.view = 'topic-card-study-menu';
+      setStatus('Card menu: pick an action.');
+    }
+  }
+
+  private async handleTopicCardStudyMenuSelect(index: number): Promise<void> {
+    const action = this.cardStudyMenuActions[index];
+    if (!action) return;
+    if (action === 'back') {
+      this.cardStudyMenuActions = [];
+      this.cardStudy = null;
+      await this.renderGlassesTopicList();
       return;
     }
+    if (action === 'read-aloud') {
+      await this.startCardReadAloud();
+      return;
+    }
+    if (action === 'mark-read') {
+      await this.applyCardStatusFromMenu('read');
+      return;
+    }
+    if (action === 'mark-learned') {
+      await this.applyCardStatusFromMenu('learned');
+      return;
+    }
+    if (action === 'mark-done') {
+      await this.applyCardStatusFromMenu('done');
+    }
+  }
+
+  private async applyCardStatusFromMenu(target: LearningCardStatus): Promise<void> {
+    const session = this.cardStudy;
+    if (!session) return;
+    const storageIdx = session.visibleStorageIndices[session.cursor];
+    if (storageIdx === undefined) return;
+    const card = session.allCards[storageIdx];
+    const prev = normalizeLearningCardStatus(card.status);
+
+    if (target === 'done' && prev !== 'done') {
+      await incrementLearningCardsLearned(this.bridge);
+    }
+    card.status = target;
 
     try {
       await saveLearningCardsForTopic(this.bridge, session.topic, session.allCards);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       appendEventLog(`saveLearningCardsForTopic failed: ${m}`);
-      await this.showAppMessage(`Could not save card progress.\n\n${m}`, '[Tap=back]');
+      await this.showAppMessage(`Could not save.\n\n${m}`, '[Tap=back]', 'topic-card-study');
       return;
     }
 
     this.recomputeVisibleCardIndices(session);
-
     if (!session.visibleStorageIndices.length) {
+      this.cardStudyMenuActions = [];
       this.cardStudy = null;
       await this.renderGlassesTopicList();
       return;
     }
 
+    const oldCursor = session.cursor;
     const idxAfter = session.visibleStorageIndices.indexOf(storageIdx);
     session.cursor =
       idxAfter >= 0 ? idxAfter : Math.min(oldCursor, session.visibleStorageIndices.length - 1);
-    await this.handleTopicCardStudyTapAdvance();
+    this.ui.view = 'topic-card-study';
+    await this.renderTopicCardStudyView();
+  }
+
+  private async finishReadAloudBackToCard(): Promise<void> {
+    revokeSharedPlaybackBlobUrl();
+    const a = getSharedPlaybackAudio();
+    a.pause();
+    a.currentTime = 0;
+    if (this.ui.view === 'topic-card-read-aloud') {
+      this.ui.view = 'topic-card-study';
+      await this.renderTopicCardStudyView();
+    }
+  }
+
+  private async cancelCardReadAloudAndReturn(): Promise<void> {
+    this.readAloudAborted = true;
+    const a = getSharedPlaybackAudio();
+    a.pause();
+    a.currentTime = 0;
+    revokeSharedPlaybackBlobUrl();
+    if (this.ui.view === 'topic-card-read-aloud') {
+      this.ui.view = 'topic-card-study';
+      await this.renderTopicCardStudyView();
+    }
+  }
+
+  private async readAloudFailedReturnToCard(message: string): Promise<void> {
+    this.readAloudAborted = true;
+    getSharedPlaybackAudio().pause();
+    revokeSharedPlaybackBlobUrl();
+    await this.showAppMessage(
+      `Read aloud\n\n${message}`,
+      '[Tap=back]',
+      'topic-card-study',
+    );
+  }
+
+  private async startCardReadAloud(): Promise<void> {
+    const session = this.cardStudy;
+    if (!session?.visibleStorageIndices.length) return;
+    const storageIdx = session.visibleStorageIndices[session.cursor];
+    if (storageIdx === undefined) return;
+    const card = session.allCards[storageIdx];
+
+    const cfg = await loadConfigFromLocalStorage(this.bridge);
+    if (!cfg.elevenLabsApiKey?.trim()) {
+      await this.readAloudFailedReturnToCard(
+        'ElevenLabs API key missing.\n\nAdd it under Settings on the phone.',
+      );
+      return;
+    }
+
+    this.readAloudAborted = false;
+    this.ui.view = 'topic-card-read-aloud';
+
+    const speakText = this.sanitizeForDisplay(
+      `${(card.cardTitle || 'Card').trim()}.\n\n${(card.text || '').trim()}`.trim(),
+      8000,
+    );
+    const titleDisplay = this.sanitizeForDisplay(card.cardTitle || 'Card', 220);
+    const bodyDisplay = this.sanitizeForDisplay(
+      (card.text || '').trim() || '(Empty)',
+      MAX_CONTENT_LENGTH,
+    );
+
+    await this.applyRebuildPageContainer(
+      new RebuildPageContainer({
+        containerTotalNum: 3,
+        textObject: [
+          new TextContainerProperty({
+            containerID: 1,
+            containerName: 'finfotext',
+            xPosition: 8,
+            yPosition: 0,
+            width: 556,
+            height: 30,
+            borderWidth: 1,
+            borderColor: 5,
+            borderRadius: 2,
+            paddingLength: 0,
+            content: '[DTap=cancel]',
+            isEventCapture: 0,
+          }),
+          new TextContainerProperty({
+            containerID: 2,
+            containerName: 'ml-read-title',
+            xPosition: 10,
+            yPosition: 32,
+            width: 556,
+            height: 48,
+            borderWidth: 0,
+            borderColor: 5,
+            paddingLength: 0,
+            content: titleDisplay,
+            isEventCapture: 0,
+          }),
+          new TextContainerProperty({
+            containerID: 3,
+            containerName: 'ml-read-body',
+            xPosition: 10,
+            yPosition: 84,
+            width: 556,
+            height: 200,
+            borderWidth: 0,
+            borderColor: 5,
+            paddingLength: 0,
+            content: bodyDisplay,
+            isEventCapture: 0,
+          }),
+        ],
+      }),
+    );
+
+    try {
+      const mp3 = await synthesizeSpeech(cfg.elevenLabsApiKey, speakText);
+      if (this.readAloudAborted || this.ui.view !== 'topic-card-read-aloud') return;
+      const audio = prepareSharedPlaybackFromMp3(mp3);
+      audio.onended = () => {
+        revokeSharedPlaybackBlobUrl();
+        if (this.readAloudAborted || this.ui.view !== 'topic-card-read-aloud') return;
+        void this.finishReadAloudBackToCard();
+      };
+      audio.onerror = () => {
+        void this.readAloudFailedReturnToCard('Audio playback error.');
+      };
+      await audio.play().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        return this.readAloudFailedReturnToCard(
+          `${msg}\n\nOn the phone: Settings → Unlock & test phone speaker.`,
+        );
+      });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      await this.readAloudFailedReturnToCard(m);
+    }
   }
 
   private async handleMainMenuSelect(index: number): Promise<void> {
@@ -871,8 +1081,7 @@ export class MicroLearningClient {
       const p = await loadLearningProgress(this.bridge);
       const grid = await loadLearningProgressGridText(this.bridge);
       await this.showAppMessage(
-        `Learning progress (365 days)\n` +
-          `Total shown: ${p.cardsShown}  learned: ${p.cardsLearned}\n\n` +
+          `Total shown: ${p.cardsShown}  learned: ${p.cardsLearned}\n` +
           grid,
         '[Tab=back]',
       );
@@ -1066,7 +1275,7 @@ export class MicroLearningClient {
         listG === OsEventTypeList.DOUBLE_CLICK_EVENT || textG === OsEventTypeList.DOUBLE_CLICK_EVENT;
       const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
       if (doubleFromChannels || doubleFromMerged) {
-        await this.handleTopicCardStudyDoubleTap();
+        await this.openTopicCardStudyMenu();
         return;
       }
 
@@ -1080,9 +1289,47 @@ export class MicroLearningClient {
       }
     }
 
+    if (this.ui.view === 'topic-card-study-menu' && event.listEvent) {
+      const listGesture = gestureFromListEvent(event.listEvent);
+      if (
+        listGesture === OsEventTypeList.SCROLL_TOP_EVENT ||
+        listGesture === OsEventTypeList.SCROLL_BOTTOM_EVENT
+      ) {
+        return;
+      }
+      if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
+        const idx = event.listEvent.currentSelectItemIndex ?? 0;
+        await this.handleTopicCardStudyMenuSelect(idx);
+        return;
+      }
+    }
+
+    if (this.ui.view === 'topic-card-read-aloud') {
+      if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
+        return;
+      }
+      const listG = gestureFromListEvent(event.listEvent);
+      const textG = gestureFromTextEvent(event.textEvent);
+      const mergedGesture = OsEventTypeList.fromJson(eventType) ?? eventType;
+      const doubleFromChannels =
+        listG === OsEventTypeList.DOUBLE_CLICK_EVENT || textG === OsEventTypeList.DOUBLE_CLICK_EVENT;
+      const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
+      if (doubleFromChannels || doubleFromMerged) {
+        await this.cancelCardReadAloudAndReturn();
+      }
+      return;
+    }
+
     if (this.ui.view === 'app-message') {
       if (eventType === OsEventTypeList.CLICK_EVENT || eventType === undefined) {
-        await this.renderMainMenu();
+        const go = this.appMessageAfterDismiss;
+        this.appMessageAfterDismiss = 'main-menu';
+        if (go === 'topic-card-study') {
+          this.ui.view = 'topic-card-study';
+          await this.renderTopicCardStudyView();
+        } else {
+          await this.renderMainMenu();
+        }
       }
       return;
     }
