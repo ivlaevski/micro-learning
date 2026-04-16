@@ -5,30 +5,15 @@ import type { LearningCard, MicroLearningConfig } from './types';
 const STATUS_ID = 'status';
 const LOG_ID = 'event-log';
 
-async function getStorageValue(bridge: EvenAppBridge | null, key: string): Promise<string> {
-  if (bridge) return (await bridge.getLocalStorage(key)) ?? '';
-  try {
-    return localStorage.getItem(key) ?? '';
-  } catch {
-    return '';
-  }
+export async function getStorageValue(bridge: EvenAppBridge | null, key: string): Promise<string> {
+  return bridge?.getLocalStorage(key) ?? '';  
 }
 
-async function setStorageValue(bridge: EvenAppBridge | null, key: string, value: string): Promise<void> {
-  if (bridge) {
-    await bridge.setLocalStorage(key, value);
-    return;
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* ignore storage errors */
-  }
+export async function setStorageValue(bridge: EvenAppBridge | null, key: string, value: string) {
+  await bridge?.setLocalStorage(key, value);
 }
 
 export function setStatus(message: string): void {
-  // eslint-disable-next-line no-console
-  console.log('[micro-learning:status]', message);
   const el = document.getElementById(STATUS_ID);
   if (el) {
     el.textContent = message;
@@ -36,8 +21,6 @@ export function setStatus(message: string): void {
 }
 
 export function appendEventLog(message: string): void {
-  // eslint-disable-next-line no-console
-  console.log('[micro-learning:log]', message);
   const el = document.getElementById(LOG_ID);
   if (!el) return;
   const now = new Date();
@@ -82,7 +65,7 @@ export function installGlobalErrorLogging(): void {
   window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
     const r = ev.reason;
     const detail = r instanceof Error ? r.stack ?? r.message : String(r);
-    appendEventLog(`[unhandledrejection] ${detail}`);
+    appendEventLog(`[--] ${detail}`);
   });
 
   const origError = console.error.bind(console);

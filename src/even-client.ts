@@ -66,16 +66,6 @@ function formatElapsedMmSs(totalSeconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function gestureFromListEvent(list: List_ItemEvent | undefined): OsEventTypeList | undefined {
-  if (!list) return undefined;
-  return OsEventTypeList.fromJson(list.eventType) ?? list.eventType;
-}
-
-function gestureFromTextEvent(text: Text_ItemEvent | undefined): OsEventTypeList | undefined {
-  if (!text) return undefined;
-  return OsEventTypeList.fromJson(text.eventType) ?? text.eventType;
-}
-
 type UiState = {
   view: ViewName;
   topics: string[];
@@ -121,7 +111,7 @@ export class MicroLearningClient {
   async init(): Promise<void> {
     await this.waitForGlassesConnected(12000);
     await this.ensureStartupUi();
-    this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
+    await this.reloadTopicsFromStorage();
     await new Promise((r) => setTimeout(r, 3500));
     await this.renderMainMenu();
 
@@ -400,9 +390,9 @@ export class MicroLearningClient {
       paddingLength: 0,
       content: this.sanitizeForDisplay(
         'Generating learning cards…\n\n' +
-          'OpenAI is building up to 19 cards for this topic. ' +
-          'They will be saved on your phone when ready.\n\n' +
-          'Please wait.',
+        'OpenAI is building up to 19 cards for this topic. ' +
+        'They will be saved on your phone when ready.\n\n' +
+        'Please wait.',
         MAX_CONTENT_LENGTH,
       ),
       isEventCapture: 0,
@@ -554,8 +544,6 @@ export class MicroLearningClient {
   private async renderMainMenu(): Promise<void> {
     this.cardStudy = null;
     this.cardStudyMenuActions = [];
-    this.ui.view = 'main-menu';
-    this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
 
     const list = new ListContainerProperty({
       containerID: 9,
@@ -607,7 +595,7 @@ export class MicroLearningClient {
           borderWidth: 0,
           borderColor: 5,
           paddingLength: 0,
-          content: '© 2026 Ivan Vlaevski  \nLicensed under the MIT License',
+          content: '© 2026 Ivan Vlaevski\nLicensed under the MIT License',
           isEventCapture: 0,
         }),
         new TextContainerProperty({
@@ -626,14 +614,15 @@ export class MicroLearningClient {
 
     const success = await this.applyRebuildPageContainer(mainPage);
     if (success) {
+      this.ui.view = 'main-menu';
       setStatus('Main menu: tap to choose an option.');
     } else {
       appendEventLog('Failed to create main menu');
     }
   }
 
-  private async renderGlassesTopicList(): Promise<void> {    
-    this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
+  private async renderGlassesTopicList(): Promise<void> {
+    await this.reloadTopicsFromStorage();
 
     if (!this.ui.topics.length) {
       await this.showAppMessage(
@@ -711,7 +700,7 @@ export class MicroLearningClient {
       await this.showAppMessage(
         this.sanitizeForDisplay(
           `No study cards for this topic.\n\n` +
-            `(Hidden or finished cards are not shown. Add cards on the phone or generate them for this topic.)`,
+          `(Hidden or finished cards are not shown. Add cards on the phone or generate them for this topic.)`,
           MAX_CONTENT_LENGTH,
         ),
         '[Tap=back]',
@@ -742,7 +731,7 @@ export class MicroLearningClient {
         ? card.cardId
         : String(pos + 1);
     const topLine = this.sanitizeForDisplay(
-      `[${idLabel}/${total}] [Tap=next][DTap=menu] [Scr↑ = topics]`,
+      `[${idLabel}/${total}] [Tap=next] [DTap=menu]`,
       260,
     );
     const titleLine = this.sanitizeForDisplay(card.cardTitle || '(No title)', 220);
@@ -764,7 +753,7 @@ export class MicroLearningClient {
       paddingLength: 0,
       content: topLine,
       isEventCapture: 0,
-    });   
+    });
 
     const titleBlock = new TextContainerProperty({
       containerID: ML_CARD_TITLE_ID,
@@ -1088,13 +1077,32 @@ export class MicroLearningClient {
       const p = await loadLearningProgress(this.bridge);
       const grid = await loadLearningProgressGridText(this.bridge);
       await this.showAppMessage(
-          `Total shown: ${p.cardsShown}  learned: ${p.cardsLearned}\n` +
-          grid,
+        `Total shown: ${p.cardsShown}  learned: ${p.cardsLearned}\n` +
+        grid,
         '[Tab=back]',
       );
     }
   }
 
+  /**
+ * Glass firmware may use different casing / underscores for text container names.
+ */
+  // private normalizeContainerName(name: string): string {
+  //   return name.replace(/_/g, '-').toLowerCase().trim();
+  // }
+
+  // private textContainerNameMatches(
+  //   got: string | undefined,
+  //   expected: string,
+  // ): boolean {
+  //   if (got == null || got === '') return false;
+  //   return this.normalizeContainerName(got) === this.normalizeContainerName(expected);
+  // }
+
+  /**
+   * `evenHubEventFromJson` can drop `listEvent` when the host uses alternate keys
+   * (`list_event`, nested `jsonData`). Merge loose payloads so list taps (main menu, etc.) work.
+   */
   private normalizeIncomingHubEvent(raw: unknown): EvenHubEvent {
     const parsed = evenHubEventFromJson(raw);
     if (raw === null || typeof raw !== 'object') return parsed;
@@ -1173,39 +1181,34 @@ export class MicroLearningClient {
     };
   }
 
-  private isDoubleClickHubGesture(event: EvenHubEvent, eventType: unknown): boolean {
-    const textG = gestureFromTextEvent(event.textEvent);
-    const listG = gestureFromListEvent(event.listEvent);
-    const merged = OsEventTypeList.fromJson(eventType) ?? eventType;
-    return (
-      textG === OsEventTypeList.DOUBLE_CLICK_EVENT ||
-      listG === OsEventTypeList.DOUBLE_CLICK_EVENT ||
-      merged === OsEventTypeList.DOUBLE_CLICK_EVENT
-    );
+  /** Gesture type from a list row event only — avoids `textEvent` stealing `eventType` on list UIs. */
+  private gestureFromListEvent(list: List_ItemEvent | undefined): OsEventTypeList | undefined {
+    if (!list) return undefined;
+    return OsEventTypeList.fromJson(list.eventType) ?? list.eventType;
   }
 
-  /** Clicks/scrolls suppressed during cooldown; double-clicks are not (so DTap still works after a tap). */
-  private eventLooksLikeCooldownBlockableGesture(event: EvenHubEvent, eventType: unknown): boolean {
-    if (this.isDoubleClickHubGesture(event, eventType)) return false;
-    const textG = gestureFromTextEvent(event.textEvent);
-    const listG = gestureFromListEvent(event.listEvent);
-    const merged = OsEventTypeList.fromJson(eventType) ?? eventType;
-    const blockClickOrScroll = (g: unknown): boolean =>
-      g === OsEventTypeList.CLICK_EVENT ||
-      g === OsEventTypeList.SCROLL_TOP_EVENT ||
-      g === OsEventTypeList.SCROLL_BOTTOM_EVENT;
-    if (blockClickOrScroll(textG) || blockClickOrScroll(listG) || blockClickOrScroll(merged)) return true;
-    if ((event.textEvent || event.listEvent) && merged === undefined) return true;
-    return false;
+  /** Gesture type from a text container event only. */
+  private gestureFromTextEvent(text: Text_ItemEvent | undefined): OsEventTypeList | undefined {
+    if (!text) return undefined;
+    return OsEventTypeList.fromJson(text.eventType) ?? text.eventType;
   }
 
-  private shouldIgnoreDueToHubGestureCooldown(event: EvenHubEvent, eventType: unknown): boolean {
-    if (performance.now() >= this.hubGestureCooldownUntilMs) return false;
-    return this.eventLooksLikeCooldownBlockableGesture(event, eventType);
-  }
+  /**
+ * Draft/ready readers call `textContainerUpgrade` twice per page (header + body). The host often
+ * echoes the same scroll direction twice in quick succession; drop the duplicate, not all rapid scrolls.
+ */
+  private lastEvent: 'top' | 'bottom' | 'click' | 'double-click' | null = null;
+  private lastEventAtMs = 0;
 
-  private markHubGestureCooldown(): void {
-    this.hubGestureCooldownUntilMs = performance.now() + MicroLearningClient.HUB_GESTURE_COOLDOWN_MS;
+  /** Ignore a second same-direction scroll within a few ms (firmware echo per text upgrade). */
+  private consumeIfNotDuplicateEventEcho(dir: 'top' | 'bottom' | 'click' | 'double-click', windowMs: number): boolean {
+    const now = performance.now();
+    if (this.lastEvent === dir && now - this.lastEventAtMs < windowMs) {
+      return false;
+    }
+    this.lastEvent = dir;
+    this.lastEventAtMs = now;
+    return true;
   }
 
   private async onEvenHubEvent(event: EvenHubEvent): Promise<void> {
@@ -1224,41 +1227,29 @@ export class MicroLearningClient {
       event.listEvent?.eventType ??
       undefined;
 
-    if (this.shouldIgnoreDueToHubGestureCooldown(event, eventType)) {
-      return;
-    }
+
 
     if (this.ui.view === 'topic-recording') {
       if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
         return;
       }
 
-      const listG = gestureFromListEvent(event.listEvent);
-      const textG = gestureFromTextEvent(event.textEvent);
-      const mergedGesture = OsEventTypeList.fromJson(eventType) ?? eventType;
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
 
-      const clickFromChannels =
-        listG === OsEventTypeList.CLICK_EVENT || textG === OsEventTypeList.CLICK_EVENT;
-      const clickFromMerged =
-        mergedGesture === OsEventTypeList.CLICK_EVENT || mergedGesture === undefined;
-      const doubleFromChannels =
-        listG === OsEventTypeList.DOUBLE_CLICK_EVENT || textG === OsEventTypeList.DOUBLE_CLICK_EVENT;
-      const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
-
-      if (clickFromChannels || clickFromMerged) {
+      if (textGesture === OsEventTypeList.CLICK_EVENT || textGesture === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
         if (this.isTopicVoiceRecording) {
           await this.toggleTopicVoiceRecording();
         }
-        this.markHubGestureCooldown();
         return;
       }
 
-      if (doubleFromChannels || doubleFromMerged) {
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
         await cancelSttRecording();
         this.isTopicVoiceRecording = false;
         this.clearTopicRecordingUi();
         await this.renderMainMenu();
-        this.markHubGestureCooldown();
         return;
       }
     }
@@ -1268,41 +1259,38 @@ export class MicroLearningClient {
     }
 
     if (this.ui.view === 'main-menu' && event.listEvent) {
-      const listGesture =
-        OsEventTypeList.fromJson(event.listEvent.eventType) ??
-        OsEventTypeList.fromJson(eventType) ??
-        eventType;
-      if (
-        listGesture === OsEventTypeList.SCROLL_TOP_EVENT ||
-        listGesture === OsEventTypeList.SCROLL_BOTTOM_EVENT
-      ) {
+      const listGesture = this.gestureFromListEvent(event.listEvent);
+
+      if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+        const idx = event.listEvent.currentSelectItemIndex ?? 0;
+        await this.handleMainMenuSelect(idx);
         return;
       }
-      const idx = event.listEvent.currentSelectItemIndex ?? 0;
-      this.markHubGestureCooldown();
-      await this.handleMainMenuSelect(idx);      
-      return;
+      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+        await this.bridge.shutDownPageContainer(1);
+        return;
+      }
     }
 
     if (this.ui.view === 'glasses-topic-list' && event.listEvent) {
-      const listGesture = gestureFromListEvent(event.listEvent);
-      if (
-        listGesture === OsEventTypeList.SCROLL_TOP_EVENT ||
-        listGesture === OsEventTypeList.SCROLL_BOTTOM_EVENT
-      ) {
-        return;
-      }
+      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
       if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
         const topics = this.ui.topics;
         const idx = event.listEvent.currentSelectItemIndex ?? 0;
         if (idx >= topics.length) {
-          this.markHubGestureCooldown();
           await this.renderMainMenu();
         } else {
           const topic = topics[idx];
-          this.markHubGestureCooldown();
           await this.openTopicCardStudy(topic);
-        }        
+        }
+        return;
+      }
+      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+        await this.renderMainMenu();
         return;
       }
     }
@@ -1311,50 +1299,31 @@ export class MicroLearningClient {
       if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
         return;
       }
-
-      const listG = gestureFromListEvent(event.listEvent);
-      const textG = gestureFromTextEvent(event.textEvent);
-      const mergedGesture = OsEventTypeList.fromJson(eventType) ?? eventType;
-
-      if (textG === OsEventTypeList.SCROLL_TOP_EVENT || mergedGesture === OsEventTypeList.SCROLL_TOP_EVENT) {
-        this.cardStudy = null;
-        await this.renderGlassesTopicList();
-        this.markHubGestureCooldown();
-        return;
-      }
-
-      const doubleFromChannels =
-        listG === OsEventTypeList.DOUBLE_CLICK_EVENT || textG === OsEventTypeList.DOUBLE_CLICK_EVENT;
-      const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
-      if (doubleFromChannels || doubleFromMerged) {
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
         await this.openTopicCardStudyMenu();
-        this.markHubGestureCooldown();
         return;
       }
-
-      const clickFromChannels =
-        listG === OsEventTypeList.CLICK_EVENT || textG === OsEventTypeList.CLICK_EVENT;
-      const clickFromMerged =
-        mergedGesture === OsEventTypeList.CLICK_EVENT || mergedGesture === undefined;
-      if (clickFromChannels || clickFromMerged) {
+      if (textGesture === OsEventTypeList.CLICK_EVENT || textGesture === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
         await this.handleTopicCardStudyTapAdvance();
-        this.markHubGestureCooldown();
         return;
       }
     }
 
     if (this.ui.view === 'topic-card-study-menu' && event.listEvent) {
-      const listGesture = gestureFromListEvent(event.listEvent);
-      if (
-        listGesture === OsEventTypeList.SCROLL_TOP_EVENT ||
-        listGesture === OsEventTypeList.SCROLL_BOTTOM_EVENT
-      ) {
-        return;
-      }
+      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
       if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
         const idx = event.listEvent.currentSelectItemIndex ?? 0;
         await this.handleTopicCardStudyMenuSelect(idx);
-        this.markHubGestureCooldown();
+        return;
+      }
+      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+        this.ui.view = 'topic-card-study';
+        await this.renderTopicCardStudyView();
         return;
       }
     }
@@ -1363,21 +1332,18 @@ export class MicroLearningClient {
       if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
         return;
       }
-      const listG = gestureFromListEvent(event.listEvent);
-      const textG = gestureFromTextEvent(event.textEvent);
-      const mergedGesture = OsEventTypeList.fromJson(eventType) ?? eventType;
-      const doubleFromChannels =
-        listG === OsEventTypeList.DOUBLE_CLICK_EVENT || textG === OsEventTypeList.DOUBLE_CLICK_EVENT;
-      const doubleFromMerged = mergedGesture === OsEventTypeList.DOUBLE_CLICK_EVENT;
-      if (doubleFromChannels || doubleFromMerged) {
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
         await this.cancelCardReadAloudAndReturn();
-        this.markHubGestureCooldown();
       }
       return;
     }
 
     if (this.ui.view === 'app-message') {
-      if (eventType === OsEventTypeList.CLICK_EVENT || eventType === undefined) {
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.CLICK_EVENT || eventType === undefined) {
+        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
         const go = this.appMessageAfterDismiss;
         this.appMessageAfterDismiss = 'main-menu';
         if (go === 'topic-card-study') {
@@ -1386,7 +1352,6 @@ export class MicroLearningClient {
         } else {
           await this.renderMainMenu();
         }
-        this.markHubGestureCooldown();
       }
       return;
     }

@@ -11,6 +11,8 @@ import {
 import { introduceTopicWithCards } from './topic-pipeline';
 import {
   appendEventLog,
+  getStorageValue,
+  setStorageValue,
   installGlobalErrorLogging,
   loadConfigFromLocalStorage,
   saveConfigToLocalStorage,
@@ -19,7 +21,6 @@ import {
   saveTopicsToLocalStorage,
 } from './utils';
 
-const READ_ALOUD_START_BANNER_DISMISS_KEY = 'micro-learning:hide-read-aloud-start-banner';
 
 declare global {
   interface Window {
@@ -31,27 +32,6 @@ declare global {
 
 let client: MicroLearningClient | null = null;
 let storageBridge: EvenAppBridge | null = null;
-
-async function getStorageValue(key: string): Promise<string> {
-  if (storageBridge) return (await storageBridge.getLocalStorage(key)) ?? '';
-  try {
-    return localStorage.getItem(key) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-async function setStorageValue(key: string, value: string): Promise<void> {
-  if (storageBridge) {
-    await storageBridge.setLocalStorage(key, value);
-    return;
-  }
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* ignore storage errors */
-  }
-}
 
 async function runPhoneAudioUnlockFromUserClick(): Promise<void> {
   try {
@@ -92,22 +72,12 @@ async function bootReadAloudStartBanner(): Promise<void> {
   const dismissBtn = document.getElementById('phone-audio-start-banner-dismiss') as HTMLButtonElement | null;
   if (!section || !unlockStart || !dismissBtn) return;
 
-  try {
-    if ((await getStorageValue(READ_ALOUD_START_BANNER_DISMISS_KEY)) === '1') {
-      section.setAttribute('hidden', '');
-    } else {
-      section.removeAttribute('hidden');
-    }
-  } catch {
-    section.removeAttribute('hidden');
-  }
-
   unlockStart.addEventListener('click', () => {
     void runPhoneAudioUnlockFromUserClick();
+    section.setAttribute('hidden', '');
   });
 
   dismissBtn.addEventListener('click', () => {
-    void setStorageValue(READ_ALOUD_START_BANNER_DISMISS_KEY, '1');
     section.setAttribute('hidden', '');
   });
 }
@@ -160,8 +130,8 @@ function bootPhoneAudioUi(): () => Promise<void> {
     );
     infoEl.textContent = lines.length ? lines.join('\n') : 'No media devices reported.';
 
-    const savedOut = await getStorageValue(PHONE_AUDIO_OUTPUT_KEY);
-    const savedIn = await getStorageValue(PHONE_AUDIO_INPUT_KEY);
+    const savedOut = await getStorageValue(storageBridge, PHONE_AUDIO_OUTPUT_KEY);
+    const savedIn = await getStorageValue(storageBridge, PHONE_AUDIO_INPUT_KEY);
 
     if (phoneAudioOutputSupportsSink()) {
       outputSel.disabled = false;
@@ -195,7 +165,7 @@ function bootPhoneAudioUi(): () => Promise<void> {
   outputSel.addEventListener('change', () => {
     const v = outputSel.value.trim();
     void (async () => {
-      await setStorageValue(PHONE_AUDIO_OUTPUT_KEY, v);
+      await setStorageValue(storageBridge, PHONE_AUDIO_OUTPUT_KEY, v);
       appendEventLog(`Phone audio: playback output ${v ? 'set' : 'cleared (system default)'}.`);
     })();
   });
@@ -203,7 +173,7 @@ function bootPhoneAudioUi(): () => Promise<void> {
   inputSel.addEventListener('change', () => {
     const v = inputSel.value.trim();
     void (async () => {
-      await setStorageValue(PHONE_AUDIO_INPUT_KEY, v);
+      await setStorageValue(storageBridge, PHONE_AUDIO_INPUT_KEY, v);
       appendEventLog('Phone audio: stored mic selection (informational).');
     })();
   });
@@ -372,7 +342,7 @@ async function main(): Promise<void> {
   window.addEventListener('micro-learning:theme-changed', (ev: Event) => {
     const custom = ev as CustomEvent<{ theme?: string }>;
     const theme = custom.detail?.theme === 'light' ? 'light' : 'dark';
-    void setStorageValue('micro-learning:theme', theme);
+    void setStorageValue(storageBridge, 'micro-learning:theme', theme);
   });
 
   setLoading(true, 'Loading…');
@@ -391,12 +361,12 @@ async function main(): Promise<void> {
       await reloadSettingsFields();
       void refreshPhoneAudioDevices();
 
-      const storedTheme = await getStorageValue('micro-learning:theme');
+      const storedTheme = await getStorageValue(storageBridge, 'micro-learning:theme');
       if (storedTheme) {
         window.__microLearningSetTheme?.(storedTheme);
       } else {
         const currentTheme = window.__microLearningGetTheme?.() ?? 'dark';
-        await setStorageValue('micro-learning:theme', currentTheme);
+        await setStorageValue(storageBridge, 'micro-learning:theme', currentTheme);
       }
 
       client = new MicroLearningClient(bridge);

@@ -4,7 +4,7 @@ import type { LearningCard } from './types';
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const TOPIC_CARDS_PROMPT_ID = 'pmpt_69da1decea7481908e47eb9cf665fbcd0c2b0f351f7d27d9';
 const TOPIC_CARDS_PROMPT_VERSION = '3';
-const MAX_CARDS = 20;
+const MAX_CARDS = 18;
 
 type ResponsesApiJson = {
   output?: unknown[];
