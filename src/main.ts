@@ -11,14 +11,15 @@ import {
 import { introduceTopicWithCards } from './topic-pipeline';
 import {
   appendEventLog,
+  deleteLearningCardsForTopic,
   getStorageValue,
-  setStorageValue,
   installGlobalErrorLogging,
   loadConfigFromLocalStorage,
-  saveConfigToLocalStorage,
-  setStatus,
   loadTopicsFromLocalStorage,
+  saveConfigToLocalStorage,
   saveTopicsToLocalStorage,
+  setStatus,
+  setStorageValue,
 } from './utils';
 
 
@@ -305,11 +306,12 @@ async function setupTopicsAndSettingsUi(): Promise<() => Promise<void>> {
       const removed = topics[index];
       topics = topics.filter((_, i) => i !== index);
       void (async () => {
+        await deleteLearningCardsForTopic(storageBridge, removed);
         await saveTopicsToLocalStorage(storageBridge, topics);
         await client?.reloadTopicsFromStorage();
         renderTopicsList();
-        appendEventLog(`Topic deleted: ${removed}`);
-        setStatus(`Deleted topic: ${removed}`);
+        appendEventLog(`Topic deleted (cards removed): ${removed}`);
+        setStatus(`Deleted topic and its learning cards: ${removed}`);
       })();
     }
   });
@@ -330,24 +332,24 @@ async function main(): Promise<void> {
   installGlobalErrorLogging();
   setStatus('Booting…');
 
-  const loadingOverlay = document.getElementById('phone-loading-overlay');
-  const loadingText = document.getElementById('phone-loading-overlay-text');
   const setLoading = (isVisible: boolean, message?: string): void => {
-    if (message && loadingText) loadingText.textContent = message;
-    if (!loadingOverlay) return;
-    if (isVisible) loadingOverlay.removeAttribute('hidden');
-    else loadingOverlay.setAttribute('hidden', '');
+    const overlay = document.getElementById('phone-loading-overlay');
+    const textEl = document.getElementById('phone-loading-overlay-text');
+    if (message && textEl) textEl.textContent = message;
+    if (!overlay) return;
+    if (isVisible) overlay.removeAttribute('hidden');
+    else overlay.setAttribute('hidden', '');
   };
 
-  window.addEventListener('micro-learning:theme-changed', (ev: Event) => {
-    const custom = ev as CustomEvent<{ theme?: string }>;
-    const theme = custom.detail?.theme === 'light' ? 'light' : 'dark';
-    void setStorageValue(storageBridge, 'micro-learning:theme', theme);
-  });
-
-  setLoading(true, 'Loading…');
-
   try {
+    window.addEventListener('micro-learning:theme-changed', (ev: Event) => {
+      const custom = ev as CustomEvent<{ theme?: string }>;
+      const theme = custom.detail?.theme === 'light' ? 'light' : 'dark';
+      void setStorageValue(storageBridge, 'micro-learning:theme', theme);
+    });
+
+    setLoading(true, 'Loading…');
+
     await bootReadAloudStartBanner();
     const reloadSettingsFields = await setupTopicsAndSettingsUi();
     const refreshPhoneAudioDevices = bootPhoneAudioUi();

@@ -106,6 +106,21 @@ export class MicroLearningClient {
   /** Call after phone saves topics so the next glasses list is fresh. */
   async reloadTopicsFromStorage(): Promise<void> {
     this.ui.topics = await loadTopicsFromLocalStorage(this.bridge);
+    const st = this.cardStudy;
+    if (st && !this.ui.topics.includes(st.topic)) {
+      this.cardStudy = null;
+      this.cardStudyMenuActions = [];
+      const v = this.ui.view;
+      if (v === 'topic-card-read-aloud') {
+        this.readAloudAborted = true;
+        getSharedPlaybackAudio().pause();
+        revokeSharedPlaybackBlobUrl();
+      }
+      if (v === 'topic-card-study' || v === 'topic-card-study-menu' || v === 'topic-card-read-aloud') {
+        this.ui.view = 'main-menu';
+        await this.renderMainMenu();
+      }
+    }
   }
 
   async init(): Promise<void> {
@@ -595,7 +610,7 @@ export class MicroLearningClient {
           borderWidth: 0,
           borderColor: 5,
           paddingLength: 0,
-          content: '© 2026 Ivan Vlaevski\nLicensed under the MIT License',
+          content: '© 2026 Ivan Vlaevski - \n Licensed under the MIT License',
           isEventCapture: 0,
         }),
         new TextContainerProperty({

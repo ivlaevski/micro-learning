@@ -342,6 +342,14 @@ export async function loadLearningCardsForTopic(
   }
 }
 
+/** Clears stored cards for this topic (same key as saveLearningCardsForTopic). */
+export async function deleteLearningCardsForTopic(
+  bridge: EvenAppBridge | null,
+  topic: string,
+): Promise<void> {
+  await setStorageValue(bridge, topicCardsStorageKey(topic), '');
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
