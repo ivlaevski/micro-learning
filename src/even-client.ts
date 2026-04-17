@@ -117,7 +117,6 @@ export class MicroLearningClient {
         revokeSharedPlaybackBlobUrl();
       }
       if (v === 'topic-card-study' || v === 'topic-card-study-menu' || v === 'topic-card-read-aloud') {
-        this.ui.view = 'main-menu';
         await this.renderMainMenu();
       }
     }
@@ -1274,7 +1273,7 @@ export class MicroLearningClient {
     }
 
     if (this.ui.view === 'main-menu' && event.listEvent) {
-      const listGesture = this.gestureFromListEvent(event.listEvent);
+      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
 
       if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
         if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
