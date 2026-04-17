@@ -11,12 +11,12 @@ let sharedPlaybackBlobUrl: string | null = null;
 let phoneAudioStorageBridge: EvenAppBridge | null = null;
 
 async function getStorageValue(key: string): Promise<string> {
-  if (phoneAudioStorageBridge) return (await phoneAudioStorageBridge.getLocalStorage(key)) ?? '';
-  try {
-    return localStorage.getItem(key) ?? '';
-  } catch {
+  if (!phoneAudioStorageBridge) {
+    // eslint-disable-next-line no-console
+    console.warn(`[micro-learning:phone-audio] bridge unavailable for get "${key}"`);
     return '';
   }
+  return (await phoneAudioStorageBridge.getLocalStorage(key)) ?? '';
 }
 
 let phonePlaybackPrimedThisSession = false;

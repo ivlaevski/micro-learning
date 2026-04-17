@@ -6,11 +6,21 @@ const STATUS_ID = 'status';
 const LOG_ID = 'event-log';
 
 export async function getStorageValue(bridge: EvenAppBridge | null, key: string): Promise<string> {
-  return bridge?.getLocalStorage(key) ?? '';  
+  if (!bridge) {
+    // eslint-disable-next-line no-console
+    console.warn(`[micro-learning:storage] bridge unavailable for get "${key}"`);
+    return '';
+  }
+  return (await bridge.getLocalStorage(key)) ?? '';
 }
 
 export async function setStorageValue(bridge: EvenAppBridge | null, key: string, value: string) {
-  await bridge?.setLocalStorage(key, value);
+  if (!bridge) {
+    // eslint-disable-next-line no-console
+    console.warn(`[micro-learning:storage] bridge unavailable for set "${key}"`);
+    return;
+  }
+  await bridge.setLocalStorage(key, value);
 }
 
 export function setStatus(message: string): void {
