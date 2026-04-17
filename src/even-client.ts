@@ -1286,6 +1286,12 @@ export class MicroLearningClient {
         await this.bridge.shutDownPageContainer(1);
         return;
       }
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+        await this.bridge.shutDownPageContainer(1);
+        return;
+      }
     }
 
     if (this.ui.view === 'glasses-topic-list' && event.listEvent) {
@@ -1303,6 +1309,12 @@ export class MicroLearningClient {
         return;
       }
       if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+        await this.renderMainMenu();
+        return;
+      }
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
         if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
         await this.renderMainMenu();
         return;
@@ -1326,15 +1338,26 @@ export class MicroLearningClient {
       }
     }
 
-    if (this.ui.view === 'topic-card-study-menu' && event.listEvent) {
-      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
-      if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        const idx = event.listEvent.currentSelectItemIndex ?? 0;
-        await this.handleTopicCardStudyMenuSelect(idx);
-        return;
+    if (this.ui.view === 'topic-card-study-menu') {
+      if (event.listEvent) {
+        const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
+        if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          const idx = event.listEvent.currentSelectItemIndex ?? 0;
+          await this.handleTopicCardStudyMenuSelect(idx);
+          return;
+        }
+        if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+          this.ui.view = 'topic-card-study';
+          await this.renderTopicCardStudyView();
+          return;
+        }
       }
-      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+
+      // Some list UIs are surfaced as text events by the host; honor double-click back here too.
+      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
+      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
         if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
         this.ui.view = 'topic-card-study';
         await this.renderTopicCardStudyView();
