@@ -2,7 +2,7 @@
   "package_id": "com.vlaevski.microlearning",
   "edition": "202601",
   "name": "micro-learning",
-  "version": "1.0.43",
+  "version": "1.0.53",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.7",
   "tagline": "Micro learning on G2 — topics and scores",
