@@ -565,20 +565,21 @@ export class MicroLearningClient {
       xPosition: 5,
       yPosition: 40,
       width: 560,
-      height: 130,
+      height: 165,
       borderWidth: 0,
       borderColor: 5,
       borderRadius: 6,
       paddingLength: 0,
       isEventCapture: 1,
       itemContainer: new ListItemContainerProperty({
-        itemCount: 3,
+        itemCount: 4,
         itemWidth: 550,
         isItemSelectBorderEn: 1,
         itemName: [
-          'Record new topic for research',
-          'List of topics',
+          'List of topics to study',
+          'Record new topic to study',
           'Learning progress',
+          'Exit',
         ],
       }),
     });
@@ -1080,11 +1081,11 @@ export class MicroLearningClient {
 
   private async handleMainMenuSelect(index: number): Promise<void> {
     if (index === 0) {
-      await this.toggleTopicVoiceRecording();
+      await this.renderGlassesTopicList();
       return;
     }
     if (index === 1) {
-      await this.renderGlassesTopicList();
+      await this.toggleTopicVoiceRecording();
       return;
     }
     if (index === 2) {
@@ -1095,23 +1096,12 @@ export class MicroLearningClient {
         grid,
         '[Tab=back]',
       );
+      return;
+    }
+    if (index === 3) {
+      await this.bridge.shutDownPageContainer(1);
     }
   }
-
-  /**
- * Glass firmware may use different casing / underscores for text container names.
- */
-  // private normalizeContainerName(name: string): string {
-  //   return name.replace(/_/g, '-').toLowerCase().trim();
-  // }
-
-  // private textContainerNameMatches(
-  //   got: string | undefined,
-  //   expected: string,
-  // ): boolean {
-  //   if (got == null || got === '') return false;
-  //   return this.normalizeContainerName(got) === this.normalizeContainerName(expected);
-  // }
 
   /**
    * `evenHubEventFromJson` can drop `listEvent` when the host uses alternate keys
@@ -1195,18 +1185,6 @@ export class MicroLearningClient {
     };
   }
 
-  /** Gesture type from a list row event only — avoids `textEvent` stealing `eventType` on list UIs. */
-  private gestureFromListEvent(list: List_ItemEvent | undefined): OsEventTypeList | undefined {
-    if (!list) return undefined;
-    return OsEventTypeList.fromJson(list.eventType) ?? list.eventType;
-  }
-
-  /** Gesture type from a text container event only. */
-  private gestureFromTextEvent(text: Text_ItemEvent | undefined): OsEventTypeList | undefined {
-    if (!text) return undefined;
-    return OsEventTypeList.fromJson(text.eventType) ?? text.eventType;
-  }
-
   /**
  * Draft/ready readers call `textContainerUpgrade` twice per page (header + body). The host often
  * echoes the same scroll direction twice in quick succession; drop the duplicate, not all rapid scrolls.
@@ -1244,27 +1222,23 @@ export class MicroLearningClient {
 
 
     if (this.ui.view === 'topic-recording') {
-      if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
-        return;
-      }
-
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-
-      if (textGesture === OsEventTypeList.CLICK_EVENT || textGesture === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        if (this.isTopicVoiceRecording) {
-          await this.toggleTopicVoiceRecording();
-        }
-        return;
-      }
-
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await cancelSttRecording();
-        this.isTopicVoiceRecording = false;
-        this.clearTopicRecordingUi();
-        await this.renderMainMenu();
-        return;
+      switch (eventType) {
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          if (this.isTopicVoiceRecording) {
+            await this.toggleTopicVoiceRecording();
+          }
+          return;
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+          await cancelSttRecording();
+          this.isTopicVoiceRecording = false;
+          this.clearTopicRecordingUi();
+          await this.renderMainMenu();
+          return;
+        default:
+          return;
       }
     }
 
@@ -1272,125 +1246,108 @@ export class MicroLearningClient {
       return;
     }
 
-    if (this.ui.view === 'main-menu' && event.listEvent) {
-      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
-
-      if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        const idx = event.listEvent.currentSelectItemIndex ?? 0;
-        await this.handleMainMenuSelect(idx);
-        return;
-      }
-      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.bridge.shutDownPageContainer(1);
-        return;
-      }
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.bridge.shutDownPageContainer(1);
-        return;
+    if (this.ui.view === 'main-menu') {
+      switch (eventType) {
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          const idx = event.listEvent?.currentSelectItemIndex ?? 0;
+          await this.handleMainMenuSelect(idx);
+          return;
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+          setStatus('Shutting down...');
+          await this.bridge.shutDownPageContainer(1);
+          return;
+        default:
+          return;
       }
     }
 
-    if (this.ui.view === 'glasses-topic-list' && event.listEvent) {
-      const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
-      if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        const topics = this.ui.topics;
-        const idx = event.listEvent.currentSelectItemIndex ?? 0;
-        if (idx >= topics.length) {
+    if (this.ui.view === 'glasses-topic-list') {
+      switch (eventType) {
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          const idx = event.listEvent?.currentSelectItemIndex ?? 0;
+          if (idx >= this.ui.topics.length) {
+            await this.renderMainMenu();
+          } else {
+            const topic = this.ui.topics[idx];
+            await this.openTopicCardStudy(topic);
+          }
+          return;
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
           await this.renderMainMenu();
-        } else {
-          const topic = topics[idx];
-          await this.openTopicCardStudy(topic);
-        }
-        return;
-      }
-      if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.renderMainMenu();
-        return;
-      }
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.renderMainMenu();
-        return;
+          return;
+        default:
+          return;
       }
     }
 
     if (this.ui.view === 'topic-card-study') {
-      if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
-        return;
-      }
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.openTopicCardStudyMenu();
-        return;
-      }
-      if (textGesture === OsEventTypeList.CLICK_EVENT || textGesture === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        await this.handleTopicCardStudyTapAdvance();
-        return;
+      switch (eventType) {
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+          await this.openTopicCardStudyMenu();
+          return;
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          await this.handleTopicCardStudyTapAdvance();
+          return;
+        default:
+          return;
       }
     }
 
     if (this.ui.view === 'topic-card-study-menu') {
-      if (event.listEvent) {
-        const listGesture = this.gestureFromListEvent(event.listEvent) ?? eventType;
-        if (listGesture === OsEventTypeList.CLICK_EVENT || listGesture === undefined) {
-          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-          const idx = event.listEvent.currentSelectItemIndex ?? 0;
-          await this.handleTopicCardStudyMenuSelect(idx);
-          return;
-        }
-        if (listGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      switch (eventType) {
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
           if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
           this.ui.view = 'topic-card-study';
           await this.renderTopicCardStudyView();
           return;
-        }
-      }
-
-      // Some list UIs are surfaced as text events by the host; honor double-click back here too.
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        this.ui.view = 'topic-card-study';
-        await this.renderTopicCardStudyView();
-        return;
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          const idx = event.listEvent?.currentSelectItemIndex ?? 0;
+          await this.handleTopicCardStudyMenuSelect(idx);
+          return;
+        default:
+          return;
       }
     }
 
     if (this.ui.view === 'topic-card-read-aloud') {
-      if (event.sysEvent?.eventType === OsEventTypeList.IMU_DATA_REPORT) {
-        return;
+      switch (eventType) {
+        case OsEventTypeList.DOUBLE_CLICK_EVENT:
+          if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
+          await this.cancelCardReadAloudAndReturn();
+          return;
+        default:
+          return;
       }
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-        if (!this.consumeIfNotDuplicateEventEcho('double-click', 900)) return;
-        await this.cancelCardReadAloudAndReturn();
-      }
-      return;
     }
 
     if (this.ui.view === 'app-message') {
-      const textGesture = this.gestureFromTextEvent(event.textEvent) ?? eventType;
-      if (textGesture === OsEventTypeList.CLICK_EVENT || eventType === undefined) {
-        if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
-        const go = this.appMessageAfterDismiss;
-        this.appMessageAfterDismiss = 'main-menu';
-        if (go === 'topic-card-study') {
-          this.ui.view = 'topic-card-study';
-          await this.renderTopicCardStudyView();
-        } else {
-          await this.renderMainMenu();
-        }
+      switch (eventType) {
+        case OsEventTypeList.CLICK_EVENT:
+        case undefined:
+          if (!this.consumeIfNotDuplicateEventEcho('click', 900)) return;
+          const go = this.appMessageAfterDismiss;
+          this.appMessageAfterDismiss = 'main-menu';
+          if (go === 'topic-card-study') {
+            this.ui.view = 'topic-card-study';
+            await this.renderTopicCardStudyView();
+          } else {
+            await this.renderMainMenu();
+          }
+          return;
+        default:
+          return;
       }
-      return;
     }
   }
 }
