@@ -609,7 +609,7 @@ export class MicroLearningClient {
           borderWidth: 0,
           borderColor: 5,
           paddingLength: 0,
-          content: '© 2026 Ivan dd Vlaevski - \n Licensed under the MIT License',
+          content: '© 2026 Ivan Vlaevski \n Licensed under the MIT License',
           isEventCapture: 0,
         }),
         new TextContainerProperty({

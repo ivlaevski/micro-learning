@@ -351,17 +351,14 @@ async function main(): Promise<void> {
     setLoading(true, 'Loading…');
 
     await bootReadAloudStartBanner();
-    const reloadSettingsFields = await setupTopicsAndSettingsUi();
-    const refreshPhoneAudioDevices = bootPhoneAudioUi();
 
     try {
       appendEventLog('Connecting to Even bridge…');
-      const bridge = await waitForEvenAppBridge();
-      storageBridge = bridge;
-      setPhoneAudioStorageBridge(bridge);
+      storageBridge = await waitForEvenAppBridge();      
+      setPhoneAudioStorageBridge(storageBridge);
       setLoading(true, 'Loading…');
-      await reloadSettingsFields();
-      void refreshPhoneAudioDevices();
+      await setupTopicsAndSettingsUi();
+      void bootPhoneAudioUi();
 
       const storedTheme = await getStorageValue(storageBridge, 'micro-learning:theme');
       if (storedTheme) {
@@ -371,7 +368,7 @@ async function main(): Promise<void> {
         await setStorageValue(storageBridge, 'micro-learning:theme', currentTheme);
       }
 
-      client = new MicroLearningClient(bridge);
+      client = new MicroLearningClient(storageBridge);
       await client.init();
       appendEventLog('Micro Learning client initialised.');
     } catch (error) {
