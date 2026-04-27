@@ -267,10 +267,10 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const cellStr = (shown: number, learned: number): string => {
-    if (shown <= 0) return '___';
+    if (shown <= 0) return '\u2007\u2007\u2007'; // U+2007 or U+25A2  ... U+2591
     const ratio = learned / shown;
-    return ratio >= 0.25 ? '_#_' : 
-                           '_=_';
+    return ratio >= 0.25 ? '\u2007\u25A3\u2007' : // U+25A3 ... U+2592
+                           '\u2007\u25A0\u2007; // U+25A0 ... U+2588
   };
 
   const today = new Date();

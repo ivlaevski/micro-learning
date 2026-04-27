@@ -15,7 +15,7 @@ export interface LearningCard {
   cardId: string;
   cardTitle: string;
   text: string;
-  additionalResearchNeeded: boolean;
+  additionalResearchNeeded: string;
   status: LearningCardStatus;
 }
 
