@@ -200,6 +200,7 @@ function bootPhoneAudioUi(): () => Promise<void> {
 /** Wires dashboard settings/topics UI and returns a function to re-apply stored values (e.g. after bridge connects). */
 async function setupTopicsAndSettingsUi(): Promise<() => Promise<void>> {
   const openAiKeyInput = document.getElementById('openai-key') as HTMLInputElement | null;
+  const openAiModelInput = document.getElementById('openai-model') as HTMLInputElement | null;
   const elevenKeyInput = document.getElementById('elevenlabs-key') as HTMLInputElement | null;
   const saveBtn = document.getElementById('save-settings') as HTMLButtonElement | null;
   const newTopicInput = document.getElementById('new-topic') as HTMLInputElement | null;
@@ -229,6 +230,7 @@ async function setupTopicsAndSettingsUi(): Promise<() => Promise<void>> {
   const applyConfigAndTopicsFromStorage = async (): Promise<void> => {
     const cfg = await loadConfigFromLocalStorage(storageBridge);
     if (openAiKeyInput) openAiKeyInput.value = cfg.openAiApiKey;
+    if (openAiModelInput) openAiModelInput.value = cfg.openAiModel;
     if (elevenKeyInput) elevenKeyInput.value = cfg.elevenLabsApiKey;
     topics = await loadTopicsFromLocalStorage(storageBridge);
     renderTopicsList();
@@ -248,6 +250,7 @@ async function setupTopicsAndSettingsUi(): Promise<() => Promise<void>> {
   saveBtn?.addEventListener('click', () => {
     void saveConfigToLocalStorage(storageBridge, {
       openAiApiKey: openAiKeyInput?.value ?? '',
+      openAiModel: openAiModelInput?.value ?? 'gpt-5.4-mini',
       elevenLabsApiKey: elevenKeyInput?.value ?? '',
     });
     appendEventLog('Settings saved.');

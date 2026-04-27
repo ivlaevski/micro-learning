@@ -21,5 +21,6 @@ export interface LearningCard {
 
 export interface MicroLearningConfig {
   openAiApiKey: string;
+  openAiModel: string;
   elevenLabsApiKey: string;
 }

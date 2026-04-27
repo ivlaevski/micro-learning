@@ -87,12 +87,15 @@ export function installGlobalErrorLogging(): void {
 }
 
 export async function loadConfigFromLocalStorage(bridge: EvenAppBridge | null): Promise<MicroLearningConfig> {
-  const [openAiApiKey, elevenLabsApiKey] = await Promise.all([
+  const [openAiApiKey, openAiModelRaw, elevenLabsApiKey] = await Promise.all([
     getStorageValue(bridge, 'micro-learning:openai-key'),
+    getStorageValue(bridge, 'micro-learning:openai-model'),
     getStorageValue(bridge, 'micro-learning:elevenlabs-key'),
   ]);
+  const openAiModel = openAiModelRaw.trim() || 'gpt-5.4-mini';
   return {
     openAiApiKey,
+    openAiModel,
     elevenLabsApiKey,
   };
 }
@@ -103,6 +106,7 @@ export async function saveConfigToLocalStorage(
 ): Promise<void> {
   await Promise.all([
     setStorageValue(bridge, 'micro-learning:openai-key', config.openAiApiKey.trim()),
+    setStorageValue(bridge, 'micro-learning:openai-model', config.openAiModel.trim() || 'gpt-5.4-mini'),
     setStorageValue(bridge, 'micro-learning:elevenlabs-key', config.elevenLabsApiKey.trim()),
   ]);
 }
@@ -263,14 +267,14 @@ export async function incrementLearningCardsLearned(bridge: EvenAppBridge | null
 
 /** 7 rows (Mon–Sun) × 10 weeks; each cell 3 chars: ` - `, ` + `, or ` x `. */
 export function formatLearningProgressGridDisplay(map: DailyProgressMap): string {
-  const WEEKS_PER_ROW = 10;
+  const WEEKS_PER_ROW = 7;
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const cellStr = (shown: number, learned: number): string => {
-    if (shown <= 0) return '\u2591\u2591\u2591'; // U+2003 or U+25A2  ... U+2591
+    if (shown <= 0) return '\u25A1\u25A1'; // U+2003 or U+25A2  ... U+2591
     const ratio = learned / shown;
-    return ratio >= 0.25 ? '\u2591\u2592\u2591' : // U+25A3 ... U+2592
-                           '\u2591\u2593\u2591'; // U+25A0 ... U+2588
+    return ratio >= 0.25 ? '\u25A1\u25A0' : // U+25A3 ... U+2592
+                           '\u25A1\u25A3'; // U+25A0 ... U+2588
   };
 
   const today = new Date();
@@ -281,7 +285,7 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
     const mon = new Date(newestMon);
     mon.setDate(mon.getDate() - (WEEKS_PER_ROW - 1 - c) * 7);
     const wk = isoWeekNumberLocal(mon);
-    header += `${String(wk).padStart(2, '\u2591')}\u2591`;
+    header += `${String(wk).padStart(2, ' ')}\u25A1`;
   }
   header += ' - Week#';
 
@@ -299,6 +303,12 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
     row += ` ${dayLabels[r]}`;
     lines.push(row);
   }
+
+  // lines.splice(0, lines.length);
+  // lines.push('|\u2611|\u2622|\u2623|\u262e|\u262f|');  
+  // lines.push('|\u25A0|\u25A1|\u25A2|\u25A3|\u25A4|\u25A5|\u25A6|\u25A7|\u25A8|\n|\u25A9|\u25AA|\u25AB|\u25AC|\u25AD|\u25AE|\u25AF - cicrles');
+  // lines.push('|\u2588|\u2589|\u258A|\u258B|\u258C|\u258D|\u258E|\u258F|\u2590|\n|\u2591|\u2592|\u2593|\u2594|\u2595|\u2596|\u2597 - boxes');
+  // lines.push('|\u2003|\u2007|\u25A1| - spaces');
 
   //lines.push('');
   //lines.push(' (=) shown or <25% learned;  (#) 25%+ learned');

@@ -2,6 +2,7 @@ import { appendEventLog } from './utils';
 import type { LearningCard } from './types';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+const DEFAULT_OPENAI_RESPONSES_MODEL = 'gpt-5.4-mini';
 const MAX_CARDS = 19;
 const TOPIC_CARDS_INSTRUCTIONS = `Provide structured, factual information about the given topic in the form of information cards presented as a JSON array. Each card must focus on a single, specific aspect or key area of knowledge related to the topic, be clearly and concisely titled, contain only verified or publicly available facts, and must not exceed 1900 characters in its "text" field. Create up to 19 cards, or fewer if the topic does not have enough unique aspects to warrant more. For each card, the "additionalResearchNeeded" value must be a related sub-topic or dimension that someone should learn more about, and it must explicitly reference the original topic to ensure that the connection is clear even if the context or topic changes later.
 
@@ -120,7 +121,11 @@ function parseCardsFromModelText(raw: string): Omit<LearningCard, 'status'>[] {
 /**
  * Calls OpenAI Responses API with inline instructions; expects a JSON array of card objects.
  */
-export async function generateLearningCardsFromTopic(apiKey: string, topic: string): Promise<LearningCard[]> {
+export async function generateLearningCardsFromTopic(
+  apiKey: string,
+  topic: string,
+  model: string = DEFAULT_OPENAI_RESPONSES_MODEL,
+): Promise<LearningCard[]> {
   const trimmed = topic.trim();
   if (!trimmed) {
     throw new Error('Topic is empty');
@@ -128,6 +133,7 @@ export async function generateLearningCardsFromTopic(apiKey: string, topic: stri
   if (!apiKey.trim()) {
     throw new Error('OpenAI API key missing');
   }
+  const selectedModel = model.trim() || DEFAULT_OPENAI_RESPONSES_MODEL;
 
   const res = await fetch(OPENAI_RESPONSES_URL, {
     method: 'POST',
@@ -136,6 +142,7 @@ export async function generateLearningCardsFromTopic(apiKey: string, topic: stri
       Authorization: `Bearer ${apiKey.trim()}`,
     },
     body: JSON.stringify({
+      model: selectedModel,
       instructions: TOPIC_CARDS_INSTRUCTIONS,
       input: [
         {

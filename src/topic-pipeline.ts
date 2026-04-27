@@ -43,7 +43,7 @@ export async function introduceTopicWithCards(
     addedToList = true;
   }
 
-  const cards = await generateLearningCardsFromTopic(cfg.openAiApiKey, trimmed);
+  const cards = await generateLearningCardsFromTopic(cfg.openAiApiKey, trimmed, cfg.openAiModel);
   await saveLearningCardsForTopic(bridge, trimmed, cards);
 
   return { addedToList, cardCount: cards.length };

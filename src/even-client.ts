@@ -25,6 +25,7 @@ import {
   setSttLiveListener,
   startSttRecording,
   stopSttAndTranscribe,
+  transcribeCurrentSttBuffer,
 } from './stt-elevenlabs';
 import {
   appendEventLog,
@@ -98,6 +99,13 @@ export class MicroLearningClient {
   private fullScreenTimerInterval: ReturnType<typeof setInterval> | null = null;
   private fullScreenTimerStartedAtMs: number | null = null;
   private topicRecordingHintLine = '';
+  private topicRecordingTranscriptLine = '';
+  private topicRecordingApiKey = '';
+  private topicLiveTranscribeInFlight = false;
+  private topicLastLiveTranscribeAtMs = 0;
+  private topicLastLiveTranscribeBytes = 0;
+  private static readonly LIVE_TRANSCRIBE_MIN_INTERVAL_MS = 3200;
+  private static readonly LIVE_TRANSCRIBE_MIN_BYTES_DELTA = 12000;
 
   constructor(bridge: EvenAppBridge) {
     this.bridge = bridge;
@@ -263,6 +271,11 @@ export class MicroLearningClient {
     this.stopFullScreenTimer();
     setSttLiveListener(null);
     this.topicRecordingHintLine = '';
+    this.topicRecordingTranscriptLine = '';
+    this.topicRecordingApiKey = '';
+    this.topicLiveTranscribeInFlight = false;
+    this.topicLastLiveTranscribeAtMs = 0;
+    this.topicLastLiveTranscribeBytes = 0;
   }
 
   private onTopicSttLive(payload: { totalBytes: number; approxDurationMs: number }): void {
@@ -274,13 +287,46 @@ export class MicroLearningClient {
       const sec = (payload.approxDurationMs / 1000).toFixed(1);
       this.topicRecordingHintLine = `~${sec}s buffered`;
     }
+    this.maybeStartLiveTopicTranscription(payload.totalBytes);
     void this.refreshTopicRecordingHint();
+  }
+
+  private maybeStartLiveTopicTranscription(totalBytes: number): void {
+    if (!this.isTopicVoiceRecording || !this.topicRecordingApiKey.trim()) return;
+    if (this.topicLiveTranscribeInFlight) return;
+    const now = Date.now();
+    if (now - this.topicLastLiveTranscribeAtMs < MicroLearningClient.LIVE_TRANSCRIBE_MIN_INTERVAL_MS) return;
+    if (
+      totalBytes > 0 &&
+      this.topicLastLiveTranscribeBytes > 0 &&
+      totalBytes - this.topicLastLiveTranscribeBytes < MicroLearningClient.LIVE_TRANSCRIBE_MIN_BYTES_DELTA
+    ) {
+      return;
+    }
+    this.topicLiveTranscribeInFlight = true;
+    void (async () => {
+      try {
+        const draft = await transcribeCurrentSttBuffer(this.topicRecordingApiKey);
+        if (draft && this.isTopicVoiceRecording && this.ui.view === 'topic-recording') {
+          const compact = draft.replace(/\s+/g, ' ').trim();
+          this.topicRecordingTranscriptLine = `Draft: ${compact.slice(0, 140)}${compact.length > 140 ? '…' : ''}`;
+          void this.refreshTopicRecordingHint();
+        }
+      } catch {
+        /* draft transcription is best effort only */
+      } finally {
+        this.topicLiveTranscribeInFlight = false;
+        this.topicLastLiveTranscribeAtMs = Date.now();
+        this.topicLastLiveTranscribeBytes = totalBytes;
+      }
+    })();
   }
 
   private async refreshTopicRecordingHint(): Promise<void> {
     if (this.ui.view !== 'topic-recording') return;
     const lines = ['Speak your new topic clearly.', ''];
     if (this.topicRecordingHintLine) lines.push(this.topicRecordingHintLine);
+    if (this.topicRecordingTranscriptLine) lines.push('', this.topicRecordingTranscriptLine);
     const text = this.sanitizeForDisplay(lines.join('\n'), MAX_CONTENT_LENGTH);
     try {
       await this.bridge.textContainerUpgrade(
@@ -455,6 +501,11 @@ export class MicroLearningClient {
 
     if (!this.isTopicVoiceRecording) {
       try {
+        this.topicRecordingApiKey = cfg.elevenLabsApiKey.trim();
+        this.topicRecordingTranscriptLine = '';
+        this.topicLiveTranscribeInFlight = false;
+        this.topicLastLiveTranscribeAtMs = 0;
+        this.topicLastLiveTranscribeBytes = 0;
         this.ui.view = 'topic-recording';
         await this.showTopicRecordingScreen();
         setSttLiveListener((p) => this.onTopicSttLive(p));

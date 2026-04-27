@@ -105,23 +105,7 @@ async function closeMic(): Promise<void> {
   }
 }
 
-export async function stopSttAndTranscribe(apiKey: string): Promise<string> {
-  if (!state.isListening) return '';
-
-  state.isListening = false;
-  await closeMic();
-
-  if (state.audioBuffer.length === 0 || state.totalBytes < MIN_AUDIO_BYTES) {
-    state.audioBuffer = [];
-    state.totalBytes = 0;
-    return '';
-  }
-
-  const pcmByteLength = state.totalBytes;
-  const wavBlob = pcmToWav(state.audioBuffer);
-  state.audioBuffer = [];
-  state.totalBytes = 0;
-
+async function transcribeWavBlob(apiKey: string, wavBlob: Blob): Promise<string> {
   const formData = new FormData();
   formData.append('file', wavBlob, 'audio.wav');
   formData.append('model_id', 'scribe_v2');
@@ -142,6 +126,36 @@ export async function stopSttAndTranscribe(apiKey: string): Promise<string> {
 
   const json = (await response.json()) as { text?: string };
   return typeof json.text === 'string' ? json.text.trim() : '';
+}
+
+/**
+ * Snapshot transcription while still recording:
+ * sends the full buffered audio from recording start without pausing the mic.
+ */
+export async function transcribeCurrentSttBuffer(apiKey: string): Promise<string> {
+  if (!state.isListening) return '';
+  if (state.audioBuffer.length === 0 || state.totalBytes < MIN_AUDIO_BYTES) return '';
+  const wavBlob = pcmToWav(state.audioBuffer);
+  return transcribeWavBlob(apiKey, wavBlob);
+}
+
+export async function stopSttAndTranscribe(apiKey: string): Promise<string> {
+  if (!state.isListening) return '';
+
+  state.isListening = false;
+  await closeMic();
+
+  if (state.audioBuffer.length === 0 || state.totalBytes < MIN_AUDIO_BYTES) {
+    state.audioBuffer = [];
+    state.totalBytes = 0;
+    return '';
+  }
+
+  const pcmByteLength = state.totalBytes;
+  const wavBlob = pcmToWav(state.audioBuffer);
+  state.audioBuffer = [];
+  state.totalBytes = 0;
+  return transcribeWavBlob(apiKey, wavBlob);
 }
 
 export async function cancelSttRecording(): Promise<void> {
