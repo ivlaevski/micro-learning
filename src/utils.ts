@@ -267,10 +267,10 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const cellStr = (shown: number, learned: number): string => {
-    if (shown <= 0) return '\u2003\u2003\u2003'; // U+2003 or U+25A2  ... U+2591
+    if (shown <= 0) return '\u2591\u2591\u2591'; // U+2003 or U+25A2  ... U+2591
     const ratio = learned / shown;
-    return ratio >= 0.25 ? '\u2003\u25A3\u2003' : // U+25A3 ... U+2592
-                           '\u2003\u25A0\u2003'; // U+25A0 ... U+2588
+    return ratio >= 0.25 ? '\u2591\u2592\u2591' : // U+25A3 ... U+2592
+                           '\u2591\u2593\u2591'; // U+25A0 ... U+2588
   };
 
   const today = new Date();
@@ -281,7 +281,7 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
     const mon = new Date(newestMon);
     mon.setDate(mon.getDate() - (WEEKS_PER_ROW - 1 - c) * 7);
     const wk = isoWeekNumberLocal(mon);
-    header += `${String(wk).padStart(2, '\u2003')}\u2003`;
+    header += `${String(wk).padStart(2, '\u2591')}\u2591`;
   }
   header += ' - Week#';
 
