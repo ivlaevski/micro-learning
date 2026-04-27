@@ -263,7 +263,7 @@ export async function incrementLearningCardsLearned(bridge: EvenAppBridge | null
 
 /** 7 rows (Mon–Sun) × 10 weeks; each cell 3 chars: ` - `, ` + `, or ` x `. */
 export function formatLearningProgressGridDisplay(map: DailyProgressMap): string {
-  const LABEL_W = 3;
+  const WEEKS_PER_ROW = 10;
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const cellStr = (shown: number, learned: number): string => {
@@ -277,9 +277,9 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
   const newestMon = startOfIsoWeekMonday(today);
 
   let header =''; //'Week_'.padStart(5, '_');
-  for (let c = 0; c < 15; c++) {
+  for (let c = 0; c < WEEKS_PER_ROW; c++) {
     const mon = new Date(newestMon);
-    mon.setDate(mon.getDate() - (14 - c) * 7);
+    mon.setDate(mon.getDate() - (WEEKS_PER_ROW - 1 - c) * 7);
     const wk = isoWeekNumberLocal(mon);
     header += `${String(wk).padStart(2, '_')}_`;
   }
@@ -289,9 +289,9 @@ export function formatLearningProgressGridDisplay(map: DailyProgressMap): string
 
   for (let r = 0; r < 7; r++) {
     let row = ''; //`${dayLabels[r]}_____`.slice(0, 5);
-    for (let c = 0; c < 15; c++) {
+    for (let c = 0; c < WEEKS_PER_ROW; c++) {
       const mon = new Date(newestMon);
-      mon.setDate(mon.getDate() - (14 - c) * 7 + r);
+      mon.setDate(mon.getDate() - (WEEKS_PER_ROW - 1 - c) * 7 + r);
       const key = localYmd(mon);
       const e = map[key] ?? { s: 0, l: 0 };
       row += cellStr(e.s, e.l);
